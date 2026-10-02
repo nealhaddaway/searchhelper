@@ -813,9 +813,12 @@ server <- function(input, output, session) {
     req(!is.null(x), nrow(x) > 0)
 
     shown <- x[, intersect(
-      c("candidate", "relation", "seed", "provider"),
+      c("candidate", "relation", "seed"),
       names(x)
     ), drop = FALSE]
+    names(shown) <- sub("^candidate$", "Term", names(shown))
+    names(shown) <- sub("^relation$", "Relationship", names(shown))
+    names(shown) <- sub("^seed$", "From term", names(shown))
 
     datatable(
       shown,
@@ -1311,33 +1314,20 @@ server <- function(input, output, session) {
     keep <- intersect(
       c(
         "candidate",
-        "type",
         "candidate_origin",
-        "external_sources",
-        "external_seeds",
         "included_records",
-        "included_prevalence",
-        "excluded_records",
-        "excluded_prevalence",
-        "log2_enrichment",
         "citation_source_records",
-        "keyword_records",
-        "occurrences"
+        "excluded_records"
       ),
       names(x)
     )
 
     shown <- x[, keep, drop = FALSE]
-
-    if ("included_prevalence" %in% names(shown)) {
-      shown$included_prevalence <- round(shown$included_prevalence, 3)
-    }
-    if ("excluded_prevalence" %in% names(shown)) {
-      shown$excluded_prevalence <- round(shown$excluded_prevalence, 3)
-    }
-    if ("log2_enrichment" %in% names(shown)) {
-      shown$log2_enrichment <- round(shown$log2_enrichment, 2)
-    }
+    names(shown) <- sub("^candidate$", "Term", names(shown))
+    names(shown) <- sub("^candidate_origin$", "Source", names(shown))
+    names(shown) <- sub("^included_records$", "Included", names(shown))
+    names(shown) <- sub("^citation_source_records$", "Citation pool", names(shown))
+    names(shown) <- sub("^excluded_records$", "Excluded", names(shown))
 
     datatable(
       shown,
@@ -1346,7 +1336,11 @@ server <- function(input, output, session) {
       options = list(
         pageLength = 20,
         scrollX = TRUE,
-        select = list(style = "multi")
+        select = list(style = "multi"),
+        columnDefs = list(
+          list(className = "dt-left", targets = c(0, 1)),
+          list(className = "dt-center", targets = c(2, 3, 4))
+        )
       )
     )
   })
