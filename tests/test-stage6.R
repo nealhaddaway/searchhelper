@@ -58,6 +58,31 @@ stopifnot(mariculture$excluded_records == 0L)
 stopifnot(mariculture$missed_gain == 2L)
 stopifnot(mariculture$log2_enrichment > 0)
 
+# A term found only in screened included records must still become a candidate.
+included_only <- rbind(
+  included,
+  data.frame(
+    title = "Commercial salmon husbandry",
+    abstract = "",
+    keywords = "farming",
+    stringsAsFactors = FALSE
+  )
+)
+
+ranked_positive <- rank_discriminative_candidates(
+  missed_records = missed,
+  included_records = included_only,
+  excluded_records = excluded,
+  query = "salmon*"
+)
+
+farming <- ranked_positive[ranked_positive$candidate == "farming", , drop = FALSE]
+stopifnot(nrow(farming) == 1L)
+stopifnot(farming$included_records == 1L)
+stopifnot(farming$citation_source_records == 0L)
+stopifnot(farming$candidate_origin == "included")
+stopifnot(!"genetics" %in% ranked_positive$candidate)
+
 fallback <- rank_discriminative_candidates(
   missed_records = missed,
   included_records = included,
