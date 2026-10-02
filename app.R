@@ -661,7 +661,7 @@ server <- function(input, output, session) {
       tags$div(
         class = "candidate-table-section border rounded p-3 mb-3",
         tags$h3("Candidate terms for your search", class = "h5"),
-        p("After citation chasing, the app removes citation records already retrieved by your current search. The remaining records are treated as missed records, and candidate terms are mined from those missed records. Select one or more candidate terms to add to a search substring."),
+        p("After citation chasing, the app compares the citation-chasing set with your current search. Non-benchmark citation records not matched by the search form a term-mining pool. They are not assumed relevant and are not a recall target. Candidate terms are mined from this unmatched pool for you to assess."),
         uiOutput("candidate_terms_status"),
         DTOutput("candidate_terms")
       ),
@@ -671,7 +671,7 @@ server <- function(input, output, session) {
         uiOutput("candidate_action")
       ),
       card(
-        card_header("Search coverage"),
+        card_header("Citation-chasing comparison"),
         uiOutput("coverage_summary")
       ),
       card(
@@ -714,7 +714,7 @@ server <- function(input, output, session) {
     tags$div(
       tags$strong(sprintf("%d candidate terms identified.", n_candidates)),
       tags$span(sprintf(
-        " They are derived from %d missed records identified only after citation chasing and comparison with the current search, out of %d non-benchmark citation records assessed.",
+        " They are derived from %d unmatched citation-chasing records, out of %d non-benchmark citation records assessed. These records are a discovery pool for term mining, not records the search is expected to retrieve.",
         missed, total
       ))
     )
@@ -737,7 +737,7 @@ server <- function(input, output, session) {
     if (is.null(citation_set())) {
       return(tags$div(
         class = "help-note",
-        "Citation coverage becomes available after benchmark records have been citation-chased."
+        "Citation-chasing comparison becomes available after benchmark records have been citation-chased."
       ))
     }
 
@@ -750,13 +750,13 @@ server <- function(input, output, session) {
   output$final_search_summary <- renderUI({
     x <- analysed_set()
     if (is.null(x)) {
-      return(tags$span(class = "text-muted", "Citation-set coverage has not yet been measured."))
+      return(tags$span(class = "text-muted", "Citation-chasing overlap has not yet been measured."))
     }
 
     m <- coverage_metrics(x)
     tags$span(
       sprintf(
-        "Current citation-set coverage: %d of %d non-benchmark records%s.",
+        "Current search matches %d of %d non-benchmark citation-chasing records%s. This overlap is descriptive, not a recall target.",
         m$captured,
         m$total,
         if (is.finite(m$proportion)) sprintf(" (%.1f%%)", 100 * m$proportion) else ""
@@ -1057,7 +1057,7 @@ server <- function(input, output, session) {
         sprintf("%d of %d non-benchmark citation records matched locally", captured, total)
       ),
       if (is.finite(pct)) tags$span(sprintf(" (%.1f%%).", pct)),
-      tags$span(sprintf(" %d records remain for candidate-term discovery.", missed))
+      tags$span(sprintf(" %d unmatched citation-chasing records remain available for candidate-term discovery. These are not assumed relevant.", missed))
     )
   })
 
@@ -1151,7 +1151,7 @@ server <- function(input, output, session) {
       )),
       tags$p(
         sprintf(
-          "Citation-set coverage changed from %d/%d (%s) to %d/%d (%s). %d citation record%s remain missed.",
+          "Current-search matches within the citation-chasing pool changed from %d/%d (%s) to %d/%d (%s). %d unmatched citation-chasing record%s remain available for term mining.",
           x$before_captured,
           x$before_total,
           before_pct,
