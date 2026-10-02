@@ -1,5 +1,6 @@
 source("R/boolean_match.R")
 source("R/term_mining.R")
+source("R/term_sources.R")
 source("R/search_blocks.R")
 source("R/suggestions.R")
 
@@ -57,6 +58,58 @@ stopifnot(mariculture$included_records == 2L)
 stopifnot(mariculture$excluded_records == 0L)
 stopifnot(mariculture$missed_gain == 2L)
 stopifnot(mariculture$log2_enrichment > 0)
+
+# A term found only in screened included records must still become a candidate.
+included_only <- rbind(
+  included,
+  data.frame(
+    title = "Commercial salmon husbandry",
+    abstract = "",
+    keywords = "farming",
+    stringsAsFactors = FALSE
+  )
+)
+
+ranked_positive <- rank_discriminative_candidates(
+  missed_records = missed,
+  included_records = included_only,
+  excluded_records = excluded,
+  query = "salmon*"
+)
+
+farming <- ranked_positive[ranked_positive$candidate == "farming", , drop = FALSE]
+stopifnot(nrow(farming) == 1L)
+stopifnot(farming$included_records == 2L)
+stopifnot(farming$citation_source_records == 0L)
+stopifnot(farming$candidate_origin == "included")
+stopifnot(!"genetics" %in% ranked_positive$candidate)
+
+external <- data.frame(
+  candidate = c("husbandry", "farming"),
+  type = c("term", "term"),
+  seed = c("farming", "farming"),
+  relation = c("synonym", "morphological variant"),
+  provider = c("Datamuse/WordNet", "Datamuse"),
+  stringsAsFactors = FALSE
+)
+
+ranked_external <- rank_discriminative_candidates(
+  missed_records = missed,
+  included_records = included,
+  excluded_records = excluded,
+  query = "salmon*",
+  external_terms = external
+)
+
+husbandry <- ranked_external[ranked_external$candidate == "husbandry", , drop = FALSE]
+stopifnot(nrow(husbandry) == 1L)
+stopifnot(grepl("external", husbandry$candidate_origin, fixed = TRUE))
+stopifnot(grepl("synonym: Datamuse/WordNet", husbandry$external_sources, fixed = TRUE))
+stopifnot(identical(husbandry$type, "term"))
+
+collapsed <- collapse_external_sources(external)
+stopifnot(nrow(collapsed) == 2L)
+stopifnot(all(c("external_sources", "external_seeds") %in% names(collapsed)))
 
 fallback <- rank_discriminative_candidates(
   missed_records = missed,

@@ -41,3 +41,10 @@ Suggestions will not silently alter the user's search string.
 ## Deployment
 
 Target: Posit-hosted Shiny deployment.
+
+
+## General lexical expansion
+
+Optional vocabulary expansion uses the Datamuse API to suggest morphological variants and general English synonyms for terms already present in the search. Synonym relations are backed by WordNet. These suggestions are kept separate from corpus evidence and are never added to the search automatically.
+
+Datamuse API: https://www.datamuse.com/api/

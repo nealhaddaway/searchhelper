@@ -6,6 +6,7 @@ source("R/ris.R")
 source("R/lens_api.R")
 source("R/boolean_match.R")
 source("R/term_mining.R")
+source("R/term_sources.R")
 source("R/search_blocks.R")
 source("R/suggestions.R")
 source("R/screening.R")
@@ -43,6 +44,7 @@ server <- function(input, output, session) {
   citation_set <- reactiveVal(NULL)
   analysed_set <- reactiveVal(NULL)
   candidates <- reactiveVal(NULL)
+  external_terms <- reactiveVal(data.frame())
   blocks <- reactiveVal(NULL)
   concept_blocks <- reactiveVal(data.frame(
     block_id = 1L,
@@ -129,7 +131,8 @@ server <- function(input, output, session) {
       included_records = included,
       excluded_records = excluded,
       query = query,
-      top_n = 250L
+      top_n = 250L,
+      external_terms = external_terms()
     )
 
     current_blocks <- if (!is.null(blocks()) && nrow(blocks())) {
@@ -139,11 +142,24 @@ server <- function(input, output, session) {
     }
 
     if (nrow(ranked)) {
-      if (all(ranked$discrimination_available)) {
+      if (nrow(included) > 0L && all(ranked$discrimination_available)) {
         ranked <- ranked[
           order(
+            -ranked$included_prevalence,
             -ranked$log2_enrichment,
-            -ranked$missed_gain,
+            -ranked$citation_gain,
+            -ranked$keyword_records,
+            ranked$candidate,
+            na.last = TRUE
+          ),
+          ,
+          drop = FALSE
+        ]
+      } else if (nrow(included) > 0L) {
+        ranked <- ranked[
+          order(
+            -ranked$included_prevalence,
+            -ranked$citation_gain,
             -ranked$keyword_records,
             ranked$candidate,
             na.last = TRUE
@@ -154,7 +170,7 @@ server <- function(input, output, session) {
       } else {
         ranked <- ranked[
           order(
-            -ranked$missed_gain,
+            -ranked$citation_gain,
             -ranked$keyword_records,
             ranked$candidate
           ),
@@ -282,6 +298,7 @@ server <- function(input, output, session) {
     citation_set(NULL)
     analysed_set(NULL)
     candidates(NULL)
+    external_terms(data.frame())
     last_add_result(NULL)
 
     showNotification(
@@ -305,6 +322,7 @@ server <- function(input, output, session) {
     citation_set(NULL)
     analysed_set(NULL)
     candidates(NULL)
+    external_terms(data.frame())
     last_add_result(NULL)
     blocks(NULL)
     shinyjs::disable("chase")
@@ -531,6 +549,7 @@ server <- function(input, output, session) {
     baseline_coverage(NA_real_)
     benchmark_source("Not specified")
     audit_events(empty_audit_events())
+    external_terms(data.frame())
     last_add_result(NULL)
     updateTextAreaInput(session, "search_string", value = "")
   }
@@ -661,7 +680,9 @@ server <- function(input, output, session) {
       tags$div(
         class = "candidate-table-section border rounded p-3 mb-3",
         tags$h3("Candidate terms for your search", class = "h5"),
-        p("After citation chasing, the app compares the citation-chasing set with your current search. Non-benchmark citation records not matched by the search form a term-mining pool. They are not assumed relevant and are not a recall target. Candidate terms are mined from this unmatched pool for you to assess."),
+        p("Candidate terms combine three evidence sources: corpus terminology from screened included records and unmatched citation-chasing records, morphological variants of terms already in your search, and general lexical synonyms. Excluded screened records help down-rank less discriminating terms but do not generate suggestions. Nothing is added to the search automatically."),
+        actionButton("expand_vocabulary", "Find variants and synonyms", class = "btn-outline-primary mb-3"),
+        uiOutput("vocabulary_status"),
         uiOutput("candidate_terms_status"),
         DTOutput("candidate_terms")
       ),
@@ -698,6 +719,54 @@ server <- function(input, output, session) {
     )
   })
 
+  observeEvent(input$expand_vocabulary, {
+    query <- trimws(input$search_string %||% "")
+    validate(need(nzchar(query), "Enter a search string first."))
+
+    withProgress(message = "Finding morphological variants and synonyms…", value = 0.1, {
+      expanded <- tryCatch(
+        expand_search_terms(query, max_per_seed = 20L),
+        error = function(e) {
+          showNotification(
+            paste("Vocabulary expansion failed:", conditionMessage(e)),
+            type = "warning",
+            duration = NULL
+          )
+          data.frame()
+        }
+      )
+
+      incProgress(0.55)
+      external_terms(expanded)
+
+      if (!is.null(citation_set())) {
+        run_analysis(query, refresh_blocks = FALSE)
+      }
+
+      incProgress(0.35)
+    })
+  })
+
+  output$vocabulary_status <- renderUI({
+    x <- external_terms()
+    if (is.null(x) || !nrow(x)) {
+      return(tags$div(
+        class = "help-note",
+        "Optional: query a general English lexical service for morphological variants and WordNet synonyms of the terms already in your search."
+      ))
+    }
+
+    n_morph <- sum(x$relation == "morphological variant")
+    n_syn <- sum(x$relation == "synonym")
+    tags$div(
+      class = "help-note",
+      sprintf(
+        "%d external suggestions loaded: %d morphological variants and %d synonyms. They are merged with corpus-derived candidates and retain their provenance.",
+        nrow(x), n_morph, n_syn
+      )
+    )
+  })
+
   output$candidate_terms_status <- renderUI({
     if (is.null(analysed_set())) {
       return(tags$div(
@@ -714,7 +783,7 @@ server <- function(input, output, session) {
     tags$div(
       tags$strong(sprintf("%d candidate terms identified.", n_candidates)),
       tags$span(sprintf(
-        " They are derived from %d unmatched citation-chasing records, out of %d non-benchmark citation records assessed. These records are a discovery pool for term mining, not records the search is expected to retrieve.",
+        " They are drawn from screened included records plus %d unmatched citation-chasing records, out of %d non-benchmark citation records assessed. Excluded screened records influence ranking but do not generate candidate terms.",
         missed, total
       ))
     )
@@ -1098,11 +1167,15 @@ server <- function(input, output, session) {
       c(
         "candidate",
         "type",
+        "candidate_origin",
+        "external_sources",
+        "external_seeds",
         "included_records",
         "included_prevalence",
         "excluded_records",
         "excluded_prevalence",
         "log2_enrichment",
+        "citation_source_records",
         "keyword_records",
         "occurrences"
       ),
