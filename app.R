@@ -62,7 +62,7 @@ server <- function(input, output, session) {
     withProgress(message = "Retrieving forward and backward citation links…", value = 0.1, {
       links <- lens_get_citation_links(ids, token)
       incProgress(0.45)
-      meta <- lens_fetch_records(unique(c(links$backward_lens_id, links$forward_lens_id)), token)
+      meta <- lens_fetch_records(unique(links$cited_lens_id), token)
       incProgress(0.45)
       citation_set(merge_citation_metadata(links, meta))
     })
