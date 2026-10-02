@@ -9,6 +9,7 @@ source("R/term_mining.R")
 
 ui <- page_sidebar(
   title = "Search Helper",
+  shinyjs::useShinyjs(),
   sidebar = sidebar(
     fileInput("ris", "Benchmark records (RIS)", accept = c(".ris", ".txt")),
     textAreaInput("search_string", "Draft Boolean search string", rows = 7,
