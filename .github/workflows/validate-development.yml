@@ -19,15 +19,14 @@ jobs:
         with:
           use-public-rspm: true
 
-      - name: Run Stage 1 tests
-        run: Rscript tests/test-stage1.R
-
-      - name: Run Stage 2 tests when present
+      - name: Run stage tests
         shell: bash
         run: |
-          if [ -f tests/test-stage2.R ]; then
-            Rscript tests/test-stage2.R
-          fi
+          set -euo pipefail
+          for test_file in tests/test-stage*.R; do
+            echo "Running $test_file"
+            Rscript "$test_file"
+          done
 
       - name: Check Lens API secret
         shell: bash
