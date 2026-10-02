@@ -518,6 +518,7 @@ server <- function(input, output, session) {
         textAreaInput(
           "search_string",
           "Naive search string",
+          value = starting_search() %||% "",
           rows = 12,
           placeholder = 'e.g. salmon AND farming'
         ),
