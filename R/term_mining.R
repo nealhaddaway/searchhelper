@@ -9,9 +9,7 @@ english_stopwords <- function() {
     "out","over","own","same","she","should","so","some","such","than","that","the","their",
     "theirs","them","themselves","then","there","these","they","this","those","through","to",
     "too","under","until","up","very","was","we","were","what","when","where","which","while",
-    "who","whom","why","will","with","would","you","your","yours","yourself","yourselves",
-    "study","studies","result","results","method","methods","using","used","use","effect",
-    "effects","data","analysis","based","research","paper","article"
+    "who","whom","why","will","with","would","you","your","yours","yourself","yourselves"
   )
 }
 
@@ -33,19 +31,30 @@ plain_search_terms <- function(query) {
 
 candidate_tokens <- function(text, include_bigrams = TRUE) {
   if (is.na(text) || !nzchar(text)) return(character())
+
   text <- tolower(text)
   text <- gsub("[^[:alnum:]-]+", " ", text)
-  x <- unlist(strsplit(text, "\\s+"), use.names = FALSE)
-  stop <- english_stopwords()
-  keep <- nzchar(x) &
-    nchar(x) >= 3 &
-    !x %in% stop &
-    !grepl("^[0-9]+$", x)
-  x <- x[keep]
+  raw <- unlist(strsplit(text, "\\s+"), use.names = FALSE)
+  raw <- raw[nzchar(raw)]
 
-  if (!include_bigrams || length(x) < 2L) return(x)
-  bigrams <- paste(head(x, -1), tail(x, -1))
-  c(x, bigrams)
+  stop <- english_stopwords()
+  content_keep <- nchar(raw) >= 3 &
+    !raw %in% stop &
+    !grepl("^[0-9]+$", raw)
+  unigrams <- raw[content_keep]
+
+  if (!include_bigrams || length(raw) < 2L) return(unigrams)
+
+  left <- head(raw, -1)
+  right <- tail(raw, -1)
+  valid_bigram <- nchar(left) >= 2 &
+    nchar(right) >= 2 &
+    !grepl("^[0-9]+$", left) &
+    !grepl("^[0-9]+$", right) &
+    !(left %in% stop & right %in% stop)
+
+  bigrams <- paste(left[valid_bigram], right[valid_bigram])
+  c(unigrams, bigrams)
 }
 
 is_already_represented <- function(candidate, search_terms) {
