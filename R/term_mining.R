@@ -271,19 +271,23 @@ rank_discriminative_candidates <- function(
 
   type_citation <- if ("type_citation" %in% names(base)) base$type_citation else rep(NA_character_, nrow(base))
   type_included <- if ("type_included" %in% names(base)) base$type_included else rep(NA_character_, nrow(base))
-  type_external <- if ("type_external" %in% names(base)) base$type_external else rep(NA_character_, nrow(base))
-  if ("type" %in% names(base)) {
-    base$type <- as.character(base$type)
+  type_external <- if ("type_external" %in% names(base)) {
+    as.character(base$type_external)
+  } else if ("type" %in% names(base)) {
+    as.character(base$type)
   } else {
-    base$type <- ifelse(
-      !is.na(type_citation),
-      type_citation,
-      ifelse(!is.na(type_included), type_included, type_external)
+    rep(NA_character_, nrow(base))
+  }
+
+  base$type <- ifelse(
+    !is.na(type_citation) & nzchar(type_citation),
+    type_citation,
+    ifelse(
+      !is.na(type_included) & nzchar(type_included),
+      type_included,
+      type_external
     )
-  }
-  if ("type_external" %in% names(base)) {
-    base$type[is.na(base$type) | !nzchar(base$type)] <- type_external[is.na(base$type) | !nzchar(base$type)]
-  }
+  )
 
   numeric_cols <- c(
     "citation_source_records",
