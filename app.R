@@ -57,6 +57,7 @@ server <- function(input, output, session) {
   baseline_coverage <- reactiveVal(NA_real_)
   benchmark_source <- reactiveVal("Not specified")
   audit_events <- reactiveVal(empty_audit_events())
+  last_add_result <- reactiveVal(NULL)
   route_mode <- reactiveVal(NULL)
 
   collect_concept_blocks <- function() {
@@ -281,6 +282,7 @@ server <- function(input, output, session) {
     citation_set(NULL)
     analysed_set(NULL)
     candidates(NULL)
+    last_add_result(NULL)
 
     showNotification(
       sprintf("%d included records selected as benchmarks. Starting citation chasing.", nrow(inc)),
@@ -303,6 +305,7 @@ server <- function(input, output, session) {
     citation_set(NULL)
     analysed_set(NULL)
     candidates(NULL)
+    last_add_result(NULL)
     blocks(NULL)
     shinyjs::disable("chase")
   })
@@ -379,7 +382,8 @@ server <- function(input, output, session) {
 
     withProgress(message = "Rechecking edited search…", value = 0.2, {
       analysed <- run_analysis(query, refresh_blocks = FALSE)
-      after <- coverage_metrics(analysed)$proportion
+      after_metrics <- coverage_metrics(analysed)
+      after <- after_metrics$proportion
 
       audit_events(
         append_audit_event(
@@ -442,7 +446,8 @@ server <- function(input, output, session) {
       }
     }, character(1))
 
-    before <- coverage_metrics(analysed_set())$proportion
+    before_metrics <- coverage_metrics(analysed_set())
+    before <- before_metrics$proportion
     idx <- match(target, b$block_id)
     target_label <- b$label[idx]
 
@@ -481,6 +486,22 @@ server <- function(input, output, session) {
       }
       audit_events(events)
 
+      last_add_result(list(
+        n_terms = length(additions),
+        additions = additions,
+        target_label = target_label,
+        target_index = idx,
+        target_expression = b$expression[idx],
+        query = query,
+        before_captured = before_metrics$captured,
+        before_total = before_metrics$total,
+        before_proportion = before_metrics$proportion,
+        after_captured = after_metrics$captured,
+        after_total = after_metrics$total,
+        after_proportion = after_metrics$proportion,
+        remaining_missed = sum(analysed$candidate_source, na.rm = TRUE)
+      ))
+
       incProgress(0.8)
     })
   })
@@ -509,6 +530,7 @@ server <- function(input, output, session) {
     baseline_coverage(NA_real_)
     benchmark_source("Not specified")
     audit_events(empty_audit_events())
+    last_add_result(NULL)
     updateTextAreaInput(session, "search_string", value = "")
   }
 
@@ -644,6 +666,7 @@ server <- function(input, output, session) {
       ),
       tags$div(
         class = "candidate-action-section",
+        uiOutput("candidate_add_feedback"),
         uiOutput("candidate_action")
       ),
       card(
@@ -1106,6 +1129,42 @@ server <- function(input, output, session) {
         scrollX = TRUE,
         select = list(style = "multi")
       )
+    )
+  })
+
+  output$candidate_add_feedback <- renderUI({
+    x <- last_add_result()
+    if (is.null(x)) return(NULL)
+
+    before_pct <- if (is.finite(x$before_proportion)) sprintf("%.1f%%", 100 * x$before_proportion) else "not available"
+    after_pct <- if (is.finite(x$after_proportion)) sprintf("%.1f%%", 100 * x$after_proportion) else "not available"
+
+    tags$div(
+      class = "alert alert-success",
+      tags$h5(sprintf(
+        "%d term%s added to Substring %d · %s",
+        x$n_terms,
+        if (x$n_terms == 1L) "" else "s",
+        x$target_index,
+        x$target_label
+      )),
+      tags$p(
+        sprintf(
+          "Citation-set coverage changed from %d/%d (%s) to %d/%d (%s). %d citation record%s remain missed.",
+          x$before_captured,
+          x$before_total,
+          before_pct,
+          x$after_captured,
+          x$after_total,
+          after_pct,
+          x$remaining_missed,
+          if (x$remaining_missed == 1L) "" else "s"
+        )
+      ),
+      tags$p(tags$strong("Updated substring:")),
+      tags$pre(class = "search-output", x$target_expression),
+      tags$p(tags$strong("Updated full search:")),
+      tags$pre(class = "search-output mb-0", x$query)
     )
   })
 
