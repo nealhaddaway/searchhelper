@@ -591,7 +591,7 @@ server <- function(input, output, session) {
     if (identical(mode, "naive")) {
       return(card(
         card_header("Naive search"),
-        p("Enter a simple starting search in the Current search box, retrieve relevance-ranked Lens records, then screen them one at a time."),
+        p("Enter a simple starting search in the Current search box, retrieve relevance-ranked Lens candidate benchmark records, then screen them one at a time."),
         layout_columns(
           col_widths = c(4, 8),
           numericInput("concept_n", "Records to retrieve", value = 500, min = 20, max = 500, step = 20),
@@ -621,7 +621,7 @@ server <- function(input, output, session) {
 
     tagList(
       tags$hr(),
-      tags$h4("Screen records"),
+      tags$h4("Screen candidate benchmark records"),
       uiOutput("screening_progress"),
       uiOutput("screening_record"),
       layout_columns(
@@ -640,7 +640,7 @@ server <- function(input, output, session) {
     tagList(
       card(
         card_header("Candidate terms for your search"),
-        p("These terms are mined from citation-chasing records that your current search missed. Select a candidate to inspect where it may fit and add it only if you judge it useful."),
+        p("After citation chasing, the app removes citation records already retrieved by your current search. The remaining records are treated as missed records, and candidate terms are mined from those missed records. Select a candidate to inspect where it may fit and add it only if you judge it useful."),
         uiOutput("candidate_terms_status"),
         DTOutput("candidate_terms"),
         uiOutput("candidate_action")
@@ -689,7 +689,7 @@ server <- function(input, output, session) {
     tags$div(
       tags$strong(sprintf("%d candidate terms identified.", n_candidates)),
       tags$span(sprintf(
-        " They are derived from %d citation-chasing records missed by the current search, out of %d non-benchmark citation records assessed.",
+        " They are derived from %d missed records identified only after citation chasing and comparison with the current search, out of %d non-benchmark citation records assessed.",
         missed, total
       ))
     )
@@ -830,7 +830,7 @@ server <- function(input, output, session) {
       return(tags$span(class = "text-muted", "No Lens sample retrieved yet."))
     }
 
-    tags$strong(sprintf("%d relevance-ranked Lens records retrieved. Screen them below one at a time.", nrow(x)))
+    tags$strong(sprintf("%d relevance-ranked Lens candidate benchmark records retrieved. Screen them below one at a time.", nrow(x)))
   })
 
   output$concept_results <- renderDT({
@@ -902,7 +902,7 @@ server <- function(input, output, session) {
       class = "border rounded p-3 mb-3",
       tags$div(
         class = "text-muted",
-        sprintf("Record %d of %d · Lens relevance rank %s", idx, nrow(s), r$rank)
+        sprintf("Candidate benchmark record %d of %d · Lens relevance rank %s", idx, nrow(s), r$rank)
       ),
       tags$h4(r$title),
       tags$p(tags$strong("Authors: "), ifelse(is.na(r$authors), "", r$authors)),
