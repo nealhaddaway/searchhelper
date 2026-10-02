@@ -10,4 +10,5 @@ Imports:
     bslib,
     DT,
     httr2,
-    shinyjs
+    shinyjs,
+    SnowballC
