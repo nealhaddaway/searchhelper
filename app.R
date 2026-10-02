@@ -139,11 +139,24 @@ server <- function(input, output, session) {
     }
 
     if (nrow(ranked)) {
-      if (all(ranked$discrimination_available)) {
+      if (nrow(included) > 0L && all(ranked$discrimination_available)) {
         ranked <- ranked[
           order(
+            -ranked$included_prevalence,
             -ranked$log2_enrichment,
-            -ranked$missed_gain,
+            -ranked$citation_gain,
+            -ranked$keyword_records,
+            ranked$candidate,
+            na.last = TRUE
+          ),
+          ,
+          drop = FALSE
+        ]
+      } else if (nrow(included) > 0L) {
+        ranked <- ranked[
+          order(
+            -ranked$included_prevalence,
+            -ranked$citation_gain,
             -ranked$keyword_records,
             ranked$candidate,
             na.last = TRUE
@@ -154,7 +167,7 @@ server <- function(input, output, session) {
       } else {
         ranked <- ranked[
           order(
-            -ranked$missed_gain,
+            -ranked$citation_gain,
             -ranked$keyword_records,
             ranked$candidate
           ),
@@ -661,7 +674,7 @@ server <- function(input, output, session) {
       tags$div(
         class = "candidate-table-section border rounded p-3 mb-3",
         tags$h3("Candidate terms for your search", class = "h5"),
-        p("After citation chasing, the app compares the citation-chasing set with your current search. Non-benchmark citation records not matched by the search form a term-mining pool. They are not assumed relevant and are not a recall target. Candidate terms are mined from this unmatched pool for you to assess."),
+        p("Candidate terms are mined from two positive evidence sources: records you screened as included and unmatched non-benchmark citation-chasing records. Excluded screened records are used to help down-rank less discriminating terms, but do not generate suggestions. Citation-chasing records are a discovery pool, not a recall target."),
         uiOutput("candidate_terms_status"),
         DTOutput("candidate_terms")
       ),
@@ -714,7 +727,7 @@ server <- function(input, output, session) {
     tags$div(
       tags$strong(sprintf("%d candidate terms identified.", n_candidates)),
       tags$span(sprintf(
-        " They are derived from %d unmatched citation-chasing records, out of %d non-benchmark citation records assessed. These records are a discovery pool for term mining, not records the search is expected to retrieve.",
+        " They are drawn from screened included records plus %d unmatched citation-chasing records, out of %d non-benchmark citation records assessed. Excluded screened records influence ranking but do not generate candidate terms.",
         missed, total
       ))
     )
@@ -1098,11 +1111,13 @@ server <- function(input, output, session) {
       c(
         "candidate",
         "type",
+        "candidate_origin",
         "included_records",
         "included_prevalence",
         "excluded_records",
         "excluded_prevalence",
         "log2_enrichment",
+        "citation_source_records",
         "keyword_records",
         "occurrences"
       ),
