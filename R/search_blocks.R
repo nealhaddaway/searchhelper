@@ -63,10 +63,64 @@ rebuild_search_from_blocks <- function(blocks) {
   paste(sprintf("(%s)", expr), collapse = " AND ")
 }
 
+strip_redundant_outer_parentheses <- function(expression) {
+  x <- trimws(expression)
+  if (!nzchar(x)) return(x)
+
+  repeat {
+    if (nchar(x) < 2L || substr(x, 1L, 1L) != "(" || substr(x, nchar(x), nchar(x)) != ")") {
+      break
+    }
+
+    chars <- strsplit(x, "", fixed = TRUE)[[1]]
+    depth <- 0L
+    in_quote <- FALSE
+    escaped <- FALSE
+    encloses_all <- TRUE
+
+    for (i in seq_along(chars)) {
+      ch <- chars[[i]]
+
+      if (escaped) {
+        escaped <- FALSE
+        next
+      }
+      if (ch == "\\" && in_quote) {
+        escaped <- TRUE
+        next
+      }
+      if (ch == '"') {
+        in_quote <- !in_quote
+        next
+      }
+      if (in_quote) next
+
+      if (ch == "(") depth <- depth + 1L
+      if (ch == ")") depth <- depth - 1L
+
+      if (depth == 0L && i < length(chars)) {
+        encloses_all <- FALSE
+        break
+      }
+      if (depth < 0L) {
+        encloses_all <- FALSE
+        break
+      }
+    }
+
+    if (!encloses_all || depth != 0L || in_quote) break
+    x <- trimws(substr(x, 2L, nchar(x) - 1L))
+  }
+
+  x
+}
+
 add_or_to_block <- function(expression, term) {
-  expression <- trimws(expression)
-  term <- trimws(term)
+  expression <- strip_redundant_outer_parentheses(expression)
+  term <- strip_redundant_outer_parentheses(term)
+
   if (!nzchar(term)) return(expression)
   if (!nzchar(expression)) return(term)
-  paste0("(", expression, " OR ", term, ")")
+
+  paste(expression, term, sep = " OR ")
 }
