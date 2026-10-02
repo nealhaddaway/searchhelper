@@ -186,11 +186,21 @@ lens_fetch_records <- function(lens_ids, token) {
 
 merge_citation_metadata <- function(links, meta) {
   if (!nrow(links)) return(data.frame())
-  agg <- aggregate(direction ~ cited_lens_id, links, function(x) {
-    u <- unique(x)
-    if (length(u) > 1) "both" else u
-  })
-  names(agg)[1] <- "lens_id"
+
+  groups <- split(links, links$cited_lens_id)
+  agg <- do.call(rbind, lapply(names(groups), function(id) {
+    g <- groups[[id]]
+    directions <- unique(g$direction)
+    data.frame(
+      lens_id = id,
+      direction = if (length(directions) > 1L) "both" else directions[[1]],
+      benchmark_count = length(unique(g$benchmark_lens_id)),
+      benchmark_sources = paste(sort(unique(g$benchmark_lens_id)), collapse = "; "),
+      stringsAsFactors = FALSE
+    )
+  }))
+  rownames(agg) <- NULL
+
   if (!nrow(meta)) return(agg)
   merge(agg, meta, by = "lens_id", all.x = TRUE, sort = FALSE)
 }
