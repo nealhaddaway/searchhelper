@@ -582,10 +582,30 @@ server <- function(input, output, session) {
 
 
 
-  observe({
+  output$final_search_display <- renderUI({
     query <- input$search_string
-    if (!is.null(query) && nzchar(query)) {
+    if (is.null(query) || !nzchar(trimws(query))) {
+      return(tags$div(
+        class = "search-output text-muted",
+        "Your improved search string will appear here."
+      ))
     }
+
+    tags$pre(class = "search-output", query)
+  })
+
+  output$search_check_status <- renderUI({
+    if (is.null(citation_set())) {
+      return(tags$div(
+        class = "help-note",
+        "Citation coverage becomes available after benchmark records have been citation-chased."
+      ))
+    }
+
+    tags$div(
+      class = "help-note",
+      "Ready to compare this search against the citation-chasing set."
+    )
   })
 
   output$final_search_summary <- renderUI({
