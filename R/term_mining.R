@@ -1,5 +1,5 @@
 english_stopwords <- function() {
-  c(
+  core <- c(
     "a","about","above","after","again","against","all","am","an","and","any","are","as","at",
     "be","because","been","before","being","below","between","both","but","by","can","could",
     "did","do","does","doing","down","during","each","few","for","from","further","had","has",
@@ -11,6 +11,23 @@ english_stopwords <- function() {
     "too","under","until","up","very","was","we","were","what","when","where","which","while",
     "who","whom","why","will","with","would","you","your","yours","yourself","yourselves"
   )
+
+  # Broader low-information English terms commonly covered by SMART/Snowball-style
+  # stopword lexicons. Kept explicit here to avoid adding a runtime package dependency.
+  extended <- c(
+    "almost","already","also","although","always","among","amongst","another","around",
+    "became","become","becomes","becoming","beside","besides","beyond","cannot",
+    "concerning","consequently","considering","despite","else","elsewhere","enough",
+    "especially","etc","ever","every","everybody","everyone","everything","everywhere",
+    "except","however","indeed","instead","later","least","less","many","meanwhile",
+    "moreover","mostly","much","neither","never","nevertheless","next","often","otherwise",
+    "perhaps","quite","rather","really","several","since","sometimes","still","thereafter",
+    "thereby","therefore","though","throughout","thus","together","toward","towards",
+    "unless","upon","via","whatever","whenever","whereas","whereby","wherever","whether",
+    "within","without","yet"
+  )
+
+  unique(c(core, extended))
 }
 
 plain_search_terms <- function(query) {
@@ -51,7 +68,8 @@ candidate_tokens <- function(text, include_bigrams = TRUE) {
     nchar(right) >= 2 &
     !grepl("^[0-9]+$", left) &
     !grepl("^[0-9]+$", right) &
-    !(left %in% stop & right %in% stop)
+    !left %in% stop &
+    !right %in% stop
 
   bigrams <- paste(left[valid_bigram], right[valid_bigram])
   c(unigrams, bigrams)
