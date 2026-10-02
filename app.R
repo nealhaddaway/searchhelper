@@ -9,6 +9,7 @@ source("R/term_mining.R")
 source("R/search_blocks.R")
 source("R/suggestions.R")
 source("R/screening.R")
+source("R/audit.R")
 
 ui <- page_sidebar(
   title = "Search Helper",
@@ -26,6 +27,18 @@ ui <- page_sidebar(
     actionButton("analyse_search", "Analyse draft search", disabled = TRUE),
     hr(),
     downloadButton("download_citations", "Download citation set (CSV)")
+  ),
+
+  card(
+    card_header("Final search"),
+    p("This is the current improved search string. Continue refining it below, or download it when you are satisfied."),
+    textAreaInput("final_search_display", NULL, value = "", rows = 8, width = "100%"),
+    layout_columns(
+      col_widths = c(6, 6),
+      downloadButton("download_final_search", "Download search string"),
+      downloadButton("download_audit", "Download audit (HTML)")
+    ),
+    uiOutput("final_search_summary")
   ),
 
   card(
@@ -113,6 +126,10 @@ server <- function(input, output, session) {
   concept_results <- reactiveVal(NULL)
   screening <- reactiveVal(NULL)
   screening_index <- reactiveVal(NA_integer_)
+  starting_search <- reactiveVal(NULL)
+  baseline_coverage <- reactiveVal(NA_real_)
+  benchmark_source <- reactiveVal("Not specified")
+  audit_events <- reactiveVal(empty_audit_events())
 
   collect_concept_blocks <- function() {
     b <- concept_blocks()
@@ -250,6 +267,8 @@ server <- function(input, output, session) {
       )
       if (!is.null(parsed_blocks)) blocks(parsed_blocks)
     }
+
+    invisible(x)
   }
 
   observeEvent(input$concept_add_block, {
@@ -300,6 +319,8 @@ server <- function(input, output, session) {
 
       concept_blocks(b)
       concept_results(result)
+      if (is.null(starting_search())) starting_search(query)
+      benchmark_source("Concept-first screening")
       screening(init_screening(result))
       screening_index(if (nrow(result)) 1L else NA_integer_)
       blocks(b)
@@ -357,6 +378,7 @@ server <- function(input, output, session) {
 
     parsed(inc)
     resolved(inc)
+    benchmark_source("Concept-first screening")
     citation_set(NULL)
     analysed_set(NULL)
     candidates(NULL)
@@ -373,6 +395,10 @@ server <- function(input, output, session) {
     req(input$ris$datapath)
     x <- parse_ris(input$ris$datapath)
     parsed(x)
+    benchmark_source("Uploaded RIS")
+    starting_search(NULL)
+    baseline_coverage(NA_real_)
+    audit_events(empty_audit_events())
     resolved(NULL)
     citation_set(NULL)
     analysed_set(NULL)
@@ -419,7 +445,12 @@ server <- function(input, output, session) {
 
   observeEvent(input$analyse_search, {
     withProgress(message = "Checking draft-search coverage…", value = 0.2, {
-      run_analysis(input$search_string, refresh_blocks = TRUE)
+      analysed <- run_analysis(input$search_string, refresh_blocks = TRUE)
+      if (is.null(starting_search())) starting_search(input$search_string)
+      if (is.na(baseline_coverage())) {
+        baseline_coverage(coverage_metrics(analysed)$proportion)
+      }
+      updateTextAreaInput(session, "final_search_display", value = input$search_string)
       incProgress(0.8)
     })
   })
@@ -428,12 +459,26 @@ server <- function(input, output, session) {
     b <- collect_blocks()
     req(!is.null(b), nrow(b) > 0)
 
+    before <- coverage_metrics(analysed_set())$proportion
     blocks(b)
     query <- rebuild_search_from_blocks(b)
     updateTextAreaInput(session, "search_string", value = query)
 
     withProgress(message = "Rechecking edited search…", value = 0.2, {
-      run_analysis(query, refresh_blocks = FALSE)
+      analysed <- run_analysis(query, refresh_blocks = FALSE)
+      after <- coverage_metrics(analysed)$proportion
+
+      audit_events(
+        append_audit_event(
+          audit_events(),
+          change_type = "Manual substring edit",
+          search_after = query,
+          coverage_before = before,
+          coverage_after = after
+        )
+      )
+
+      updateTextAreaInput(session, "final_search_display", value = query)
       incProgress(0.8)
     })
   })
@@ -480,7 +525,9 @@ server <- function(input, output, session) {
     addition <- input$candidate_form
     validate(need(!is.null(addition) && nzchar(addition), "Choose how to add the candidate."))
 
+    before <- coverage_metrics(analysed_set())$proportion
     idx <- match(target, b$block_id)
+    target_label <- b$label[idx]
     b$expression[idx] <- add_or_to_block(b$expression[idx], addition)
     blocks(b)
 
@@ -488,11 +535,96 @@ server <- function(input, output, session) {
     updateTextAreaInput(session, "search_string", value = query)
 
     withProgress(message = "Rechecking search after adding candidate…", value = 0.2, {
-      run_analysis(query, refresh_blocks = FALSE)
+      analysed <- run_analysis(query, refresh_blocks = FALSE)
+      after <- coverage_metrics(analysed)$proportion
+
+      get_value <- function(name, default = NA) {
+        if (name %in% names(cand)) cand[[name]][[1]] else default
+      }
+
+      audit_events(
+        append_audit_event(
+          audit_events(),
+          change_type = "Candidate term added",
+          search_after = query,
+          term = cand$candidate[[1]],
+          target_substring = target_label,
+          syntax = addition,
+          incremental_recovery = get_value("incremental_recovery", NA_integer_),
+          included_prevalence = get_value("included_prevalence", NA_real_),
+          excluded_prevalence = get_value("excluded_prevalence", NA_real_),
+          log2_enrichment = get_value("log2_enrichment", NA_real_),
+          coverage_before = before,
+          coverage_after = after
+        )
+      )
+
+      updateTextAreaInput(session, "final_search_display", value = query)
       incProgress(0.8)
     })
   })
 
+
+
+  observe({
+    query <- input$search_string
+    if (!is.null(query) && nzchar(query)) {
+      updateTextAreaInput(session, "final_search_display", value = query)
+    }
+  })
+
+  output$final_search_summary <- renderUI({
+    x <- analysed_set()
+    if (is.null(x)) {
+      return(tags$span(class = "text-muted", "Citation-set coverage has not yet been measured."))
+    }
+
+    m <- coverage_metrics(x)
+    tags$span(
+      sprintf(
+        "Current citation-set coverage: %d of %d non-benchmark records%s.",
+        m$captured,
+        m$total,
+        if (is.finite(m$proportion)) sprintf(" (%.1f%%)", 100 * m$proportion) else ""
+      )
+    )
+  })
+
+  output$download_final_search <- downloadHandler(
+    filename = function() paste0("searchhelper-final-search-", Sys.Date(), ".txt"),
+    content = function(file) {
+      writeLines(input$search_string, file, useBytes = TRUE)
+    }
+  )
+
+  output$download_audit <- downloadHandler(
+    filename = function() paste0("searchhelper-audit-", Sys.Date(), ".html"),
+    content = function(file) {
+      req(resolved())
+
+      citations <- citation_set()
+      backward <- if (is.null(citations)) 0L else sum(citations$direction %in% c("backward", "both"))
+      forward <- if (is.null(citations)) 0L else sum(citations$direction %in% c("forward", "both"))
+
+      final_cov <- coverage_metrics(analysed_set())$proportion
+      start <- starting_search()
+      if (is.null(start) || !nzchar(start)) start <- input$search_string
+
+      html <- render_audit_html(
+        starting_search = start,
+        final_search = input$search_string,
+        benchmark_source = benchmark_source(),
+        benchmark_count = sum(!is.na(resolved()$lens_id)),
+        backward_count = backward,
+        forward_count = forward,
+        baseline_coverage = baseline_coverage(),
+        final_coverage = final_cov,
+        events = audit_events()
+      )
+
+      writeLines(html, file, useBytes = TRUE)
+    }
+  )
 
   output$concept_block_editor <- renderUI({
     b <- concept_blocks()
