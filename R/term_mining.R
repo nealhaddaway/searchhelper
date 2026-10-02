@@ -197,7 +197,8 @@ rank_discriminative_candidates <- function(
   excluded_records,
   query = "",
   top_n = 200L,
-  prior = 0.5
+  prior = 0.5,
+  external_terms = NULL
 ) {
   source_limit <- max(as.integer(top_n), 500L)
 
@@ -242,12 +243,46 @@ rank_discriminative_candidates <- function(
     sort = FALSE
   )
 
+  external_source <- if (exists("collapse_external_sources", mode = "function")) {
+    collapse_external_sources(external_terms)
+  } else {
+    data.frame(
+      candidate = character(),
+      type = character(),
+      external_sources = character(),
+      external_seeds = character(),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  if (nrow(external_source)) {
+    base <- merge(
+      base,
+      external_source,
+      by = "candidate",
+      all = TRUE,
+      suffixes = c("", "_external"),
+      sort = FALSE
+    )
+  } else {
+    base$external_sources <- NA_character_
+    base$external_seeds <- NA_character_
+  }
+
   type_citation <- if ("type_citation" %in% names(base)) base$type_citation else rep(NA_character_, nrow(base))
   type_included <- if ("type_included" %in% names(base)) base$type_included else rep(NA_character_, nrow(base))
+  type_external <- if ("type_external" %in% names(base)) base$type_external else rep(NA_character_, nrow(base))
   if ("type" %in% names(base)) {
     base$type <- as.character(base$type)
   } else {
-    base$type <- ifelse(!is.na(type_citation), type_citation, type_included)
+    base$type <- ifelse(
+      !is.na(type_citation),
+      type_citation,
+      ifelse(!is.na(type_included), type_included, type_external)
+    )
+  }
+  if ("type_external" %in% names(base)) {
+    base$type[is.na(base$type) | !nzchar(base$type)] <- type_external[is.na(base$type) | !nzchar(base$type)]
   }
 
   numeric_cols <- c(
@@ -263,11 +298,17 @@ rank_discriminative_candidates <- function(
     base[[nm]][is.na(base[[nm]])] <- 0L
   }
 
-  base$candidate_origin <- ifelse(
-    base$included_source_records > 0L & base$citation_source_records > 0L,
-    "included + citation",
-    ifelse(base$included_source_records > 0L, "included", "citation")
-  )
+  base$candidate_origin <- vapply(seq_len(nrow(base)), function(i) {
+    sources <- character()
+    if (base$included_source_records[i] > 0L) sources <- c(sources, "included")
+    if (base$citation_source_records[i] > 0L) sources <- c(sources, "citation")
+    if ("external_sources" %in% names(base) &&
+        !is.na(base$external_sources[i]) &&
+        nzchar(base$external_sources[i])) {
+      sources <- c(sources, "external")
+    }
+    paste(sources, collapse = " + ")
+  }, character(1))
   base$occurrences <- base$included_source_occurrences + base$citation_source_occurrences
   base$keyword_records <- base$included_source_keyword_records + base$citation_source_keyword_records
   base$n_records <- base$included_source_records + base$citation_source_records
