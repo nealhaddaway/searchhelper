@@ -21,6 +21,9 @@ ui <- page_sidebar(
     .search-block { background: var(--bs-body-bg); }
     .search-output { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 1rem; line-height: 1.5; background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: 1rem; }
     .help-note { font-size: .9rem; color: var(--bs-secondary-color); margin-top: .5rem; }
+    .candidate-table-section { position: relative; display: block; width: 100%; overflow: visible; }
+    .candidate-table-section .dataTables_wrapper { position: relative; display: block; width: 100%; margin-bottom: 1rem; }
+    .candidate-action-section { position: relative; display: block; clear: both; width: 100%; margin-top: 1.5rem; z-index: 0; }
   "))),
   sidebar = sidebar(
     title = "Search",
@@ -632,11 +635,15 @@ server <- function(input, output, session) {
     if (is.null(citation_set())) return(NULL)
 
     tagList(
-      card(
-        card_header("Candidate terms for your search"),
-        p("After citation chasing, the app removes citation records already retrieved by your current search. The remaining records are treated as missed records, and candidate terms are mined from those missed records. Select a candidate to inspect where it may fit and add it only if you judge it useful."),
+      tags$div(
+        class = "candidate-table-section border rounded p-3 mb-3",
+        tags$h3("Candidate terms for your search", class = "h5"),
+        p("After citation chasing, the app removes citation records already retrieved by your current search. The remaining records are treated as missed records, and candidate terms are mined from those missed records. Select one or more candidate terms to add to a search substring."),
         uiOutput("candidate_terms_status"),
-        DTOutput("candidate_terms"),
+        DTOutput("candidate_terms")
+      ),
+      tags$div(
+        class = "candidate-action-section",
         uiOutput("candidate_action")
       ),
       card(
