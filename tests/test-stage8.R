@@ -34,4 +34,11 @@ cat("Connect Cloud UI hotfix tests passed.\n")
 
 app_text <- paste(readLines("app.R", warn = FALSE), collapse = "\n")
 stopifnot(grepl("fillable = FALSE", app_text, fixed = TRUE))
+stopifnot(grepl('Search Lens again', app_text, fixed = TRUE))
+stopifnot(grepl('run_naive_lens_iteration', app_text, fixed = TRUE))
+stopifnot(grepl('replace_existing = TRUE', app_text, fixed = TRUE))
+stopifnot(grepl('Variants and synonyms', app_text, fixed = TRUE))
+stopifnot(grepl('Add selected suggestions', app_text, fixed = TRUE))
+stopifnot(grepl('external_suggestions_rows_selected', app_text, fixed = TRUE))
+
 cat("Natural page-flow regression test passed.\n")

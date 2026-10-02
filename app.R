@@ -227,12 +227,12 @@ server <- function(input, output, session) {
     concept_blocks(b)
   })
 
-  observeEvent(input$concept_search, {
+  run_naive_lens_iteration <- function(query, replace_existing = FALSE) {
     validate(need(identical(route_mode(), "naive"), "Choose the naive-search route first."))
     validate(need(nzchar(token), "LENS_API_TOKEN is not available in the app environment."))
-    validate(need(nzchar(trimws(input$search_string)), "Enter a naive Boolean search string first."))
+    validate(need(nzchar(trimws(query)), "Enter a Boolean search string first."))
 
-    query <- trimws(input$search_string)
+    query <- trimws(query)
 
     withProgress(message = "Searching Lens by relevance…", value = 0.15, {
       result <- tryCatch(
@@ -243,7 +243,18 @@ server <- function(input, output, session) {
         }
       )
       req(!is.null(result))
-      incProgress(0.75)
+      incProgress(0.65)
+
+      if (isTRUE(replace_existing)) {
+        parsed(NULL)
+        resolved(NULL)
+        citation_set(NULL)
+        analysed_set(NULL)
+        candidates(NULL)
+        external_terms(data.frame())
+        last_add_result(NULL)
+        baseline_coverage(NA_real_)
+      }
 
       concept_results(result)
       if (is.null(starting_search())) starting_search(query)
@@ -254,8 +265,16 @@ server <- function(input, output, session) {
       parsed_blocks <- tryCatch(split_search_blocks(query), error = function(e) NULL)
       if (!is.null(parsed_blocks)) blocks(parsed_blocks)
 
-      incProgress(0.10)
+      incProgress(0.20)
     })
+  }
+
+  observeEvent(input$concept_search, {
+    run_naive_lens_iteration(input$search_string, replace_existing = FALSE)
+  })
+
+  observeEvent(input$search_lens_again, {
+    run_naive_lens_iteration(input$search_string, replace_existing = TRUE)
   })
 
   record_screen_decision <- function(decision) {
@@ -576,8 +595,11 @@ server <- function(input, output, session) {
         ),
         if (!is.null(citation_set())) {
           tagList(
-            actionButton("analyse_search", "Reidentify candidate terms", class = "btn-primary"),
-            uiOutput("search_check_status")
+            actionButton("search_lens_again", "Search Lens again", class = "btn-primary"),
+            tags$div(
+              class = "help-note",
+              "Runs the current improved search in Lens as a new iteration. The previous screening, benchmarks, citation-chasing results and candidate terms are replaced only after the new Lens search succeeds."
+            )
           )
         }
       ))
@@ -683,6 +705,7 @@ server <- function(input, output, session) {
         p("Candidate terms combine three evidence sources: corpus terminology from screened included records and unmatched citation-chasing records, morphological variants of terms already in your search, and general lexical synonyms. Excluded screened records help down-rank less discriminating terms but do not generate suggestions. Nothing is added to the search automatically."),
         actionButton("expand_vocabulary", "Find variants and synonyms", class = "btn-outline-primary mb-3"),
         uiOutput("vocabulary_status"),
+        uiOutput("external_suggestions_panel"),
         uiOutput("candidate_terms_status"),
         DTOutput("candidate_terms")
       ),
@@ -764,6 +787,128 @@ server <- function(input, output, session) {
         "%d external suggestions loaded: %d morphological variants and %d synonyms. They are merged with corpus-derived candidates and retain their provenance.",
         nrow(x), n_morph, n_syn
       )
+    )
+  })
+
+  output$external_suggestions_panel <- renderUI({
+    x <- external_terms()
+    if (is.null(x) || !nrow(x)) return(NULL)
+
+    tagList(
+      tags$div(
+        class = "border rounded p-3 mb-3",
+        tags$h5("Variants and synonyms"),
+        tags$p(
+          class = "text-muted",
+          "Select one or more suggestions below. These are external lexical suggestions and are not added automatically."
+        ),
+        DTOutput("external_suggestions"),
+        uiOutput("external_suggestion_action")
+      )
+    )
+  })
+
+  output$external_suggestions <- renderDT({
+    x <- external_terms()
+    req(!is.null(x), nrow(x) > 0)
+
+    shown <- x[, intersect(
+      c("candidate", "relation", "seed", "provider"),
+      names(x)
+    ), drop = FALSE]
+
+    datatable(
+      shown,
+      rownames = FALSE,
+      selection = "multiple",
+      options = list(
+        pageLength = 10,
+        scrollX = TRUE,
+        select = list(style = "multi")
+      )
+    )
+  })
+
+  output$external_suggestion_action <- renderUI({
+    x <- external_terms()
+    selected <- input$external_suggestions_rows_selected
+    if (is.null(x) || !nrow(x) || !length(selected)) return(NULL)
+
+    b <- collect_blocks()
+    req(!is.null(b), nrow(b) > 0)
+
+    selected_terms <- x[selected, , drop = FALSE]
+    block_choices <- setNames(
+      b$block_id,
+      paste0("Substring ", seq_len(nrow(b)), " · ", b$label)
+    )
+
+    tagList(
+      tags$p(
+        tags$strong(sprintf(
+          "%d external suggestion%s selected",
+          nrow(selected_terms),
+          if (nrow(selected_terms) == 1L) "" else "s"
+        ))
+      ),
+      selectInput(
+        "external_candidate_block",
+        "Add selected suggestions to substring",
+        choices = block_choices,
+        selected = b$block_id[1]
+      ),
+      actionButton(
+        "add_external_suggestions",
+        sprintf(
+          "Add %d selected suggestion%s",
+          nrow(selected_terms),
+          if (nrow(selected_terms) == 1L) "" else "s"
+        ),
+        class = "btn-primary"
+      )
+    )
+  })
+
+  observeEvent(input$add_external_suggestions, {
+    x <- external_terms()
+    selected <- input$external_suggestions_rows_selected
+    validate(need(!is.null(x) && nrow(x) > 0 && length(selected) > 0, "Select at least one suggestion first."))
+
+    b <- collect_blocks()
+    req(!is.null(b), nrow(b) > 0)
+
+    target <- suppressWarnings(as.integer(input$external_candidate_block))
+    validate(need(!is.na(target) && target %in% b$block_id, "Choose a target substring."))
+
+    idx <- match(target, b$block_id)
+    selected_terms <- x[selected, , drop = FALSE]
+
+    additions <- vapply(seq_len(nrow(selected_terms)), function(i) {
+      term <- selected_terms$candidate[i]
+      if (grepl(" ", term, fixed = TRUE)) paste0('"', term, '"') else term
+    }, character(1))
+
+    for (addition in additions) {
+      b$expression[idx] <- add_or_to_block(b$expression[idx], addition)
+    }
+
+    blocks(b)
+    query <- rebuild_search_from_blocks(b)
+    updateTextAreaInput(session, "search_string", value = query)
+
+    withProgress(message = "Updating search after adding external suggestions…", value = 0.2, {
+      analysed <- run_analysis(query, refresh_blocks = FALSE)
+      incProgress(0.8)
+    })
+
+    showNotification(
+      sprintf(
+        "%d external suggestion%s added to Substring %d.",
+        nrow(selected_terms),
+        if (nrow(selected_terms) == 1L) "" else "s",
+        target
+      ),
+      type = "message"
     )
   })
 
