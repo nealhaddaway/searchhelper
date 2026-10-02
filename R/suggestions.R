@@ -106,3 +106,50 @@ proximity_advice <- function(candidate, type = "term", distance = 3L) {
     ". Proximity syntax and directionality must be translated per database."
   )
 }
+
+
+candidate_query_token <- function(candidate, type = "term") {
+  if (identical(type, "phrase")) paste0('"', candidate, '"') else candidate
+}
+
+candidate_incremental_gain <- function(records, blocks, candidate, type = "term") {
+  if (is.null(records) || !nrow(records) || is.null(blocks) || !nrow(blocks)) {
+    return(data.frame())
+  }
+
+  token <- candidate_query_token(candidate, type)
+  rows <- lapply(seq_len(nrow(blocks)), function(i) {
+    trial <- blocks
+    trial$expression[i] <- add_or_to_block(trial$expression[i], token)
+    query <- rebuild_search_from_blocks(trial)
+
+    matched <- tryCatch(
+      match_search_records(records, query),
+      error = function(e) rep(FALSE, nrow(records))
+    )
+
+    data.frame(
+      block_id = blocks$block_id[i],
+      label = blocks$label[i],
+      incremental_gain = sum(matched, na.rm = TRUE),
+      stringsAsFactors = FALSE
+    )
+  })
+
+  out <- do.call(rbind, rows)
+  out[order(-out$incremental_gain, out$block_id), , drop = FALSE]
+}
+
+best_candidate_gain <- function(records, blocks, candidate, type = "term") {
+  gains <- candidate_incremental_gain(records, blocks, candidate, type)
+  if (!nrow(gains)) {
+    return(list(block_id = NA_integer_, label = NA_character_, gain = 0L))
+  }
+
+  best <- gains[1, , drop = FALSE]
+  list(
+    block_id = best$block_id[[1]],
+    label = best$label[[1]],
+    gain = as.integer(best$incremental_gain[[1]])
+  )
+}
