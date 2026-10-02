@@ -3,8 +3,8 @@ source("R/audit.R")
 
 app_text <- paste(readLines("app.R", warn = FALSE), collapse = "\n")
 stopifnot(grepl("Your improved search string", app_text, fixed = TRUE))
-stopifnot(grepl("Start with concepts", app_text, fixed = TRUE))
-stopifnot(grepl("Start with benchmark records", app_text, fixed = TRUE))
+stopifnot(grepl("Start with a naive search", app_text, fixed = TRUE))
+stopifnot(grepl("Upload benchmark records", app_text, fixed = TRUE))
 stopifnot(!grepl("Stage 4 ·", app_text, fixed = TRUE))
 stopifnot(!grepl("Stage 1 ·", app_text, fixed = TRUE))
 

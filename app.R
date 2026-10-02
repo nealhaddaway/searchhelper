@@ -23,109 +23,13 @@ ui <- page_sidebar(
     .help-note { font-size: .9rem; color: var(--bs-secondary-color); margin-top: .5rem; }
   "))),
   sidebar = sidebar(
-    title = "Current search",
-    textAreaInput(
-      "search_string",
-      "Search string",
-      rows = 12,
-      placeholder = '(concept A OR synonym*) AND ("concept B" OR term)'
-    ),
-    actionButton("analyse_search", "Check citation coverage", disabled = TRUE),
-    uiOutput("search_check_status"),
-    hr(),
-    tags$p(class = "text-muted small", "Already have known relevant papers? Upload them below in Start with benchmark records.")
+    title = "Search",
+    uiOutput("sidebar_ui")
   ),
 
-  card(
-    card_header("Your improved search string"),
-    p("This is the main output. Continue refining it below, or download it when you are satisfied."),
-    uiOutput("final_search_display"),
-    layout_columns(
-      col_widths = c(6, 6),
-      downloadButton("download_final_search", "Download search string"),
-      downloadButton("download_audit", "Download audit (HTML)")
-    ),
-    uiOutput("final_search_summary")
-  ),
-
-  card(
-    card_header("Start with concepts"),
-    p("Use this route if you do not already have benchmark papers. Build one or more search substrings, retrieve a relevance-ranked Lens sample, then screen records to create your benchmark set."),
-    uiOutput("concept_block_editor"),
-    layout_columns(
-      col_widths = c(4, 4, 4),
-      actionButton("concept_add_block", "Add substring"),
-      numericInput("concept_n", "Records to retrieve", value = 500, min = 20, max = 500, step = 20),
-      actionButton("concept_search", "Search Lens", class = "btn-primary")
-    ),
-    uiOutput("concept_query_preview"),
-    uiOutput("concept_search_summary"),
-    DTOutput("concept_results"),
-    tags$hr(),
-    layout_columns(
-      col_widths = c(4, 8),
-      numericInput("benchmark_target", "Benchmark target", value = 20, min = 1, max = 500, step = 1),
-      uiOutput("screening_progress")
-    ),
-    uiOutput("screening_record"),
-    layout_columns(
-      col_widths = c(3, 3, 3, 3),
-      actionButton("screen_include", "Include", class = "btn-success"),
-      actionButton("screen_exclude", "Exclude", class = "btn-danger"),
-      actionButton("screen_unsure", "Unsure"),
-      actionButton("promote_benchmarks", "Use included as benchmarks", class = "btn-primary")
-    )
-  ),
-
-  card(
-    card_header("Start with benchmark records"),
-    p("Use this route if you already have known relevant papers. Upload them as RIS, resolve them in Lens, then use citation chasing to test and improve your search."),
-    fileInput("ris", "Benchmark records (RIS)", accept = c(".ris", ".txt")),
-    actionButton("resolve", "Resolve benchmarks in Lens", class = "btn-primary"),
-    actionButton("chase", "Run citation chasing", disabled = TRUE),
-    uiOutput("status"),
-    accordion(
-      accordion_panel("View benchmark records", DTOutput("benchmarks")),
-      open = FALSE
-    )
-  ),
-
-  card(
-    card_header("Citation-chasing coverage"),
-    p("The app checks both backward references and forward citations from your benchmark set."),
-    uiOutput("citation_summary"),
-    accordion(
-      accordion_panel("View citation-chasing records", DTOutput("citations")),
-      open = FALSE
-    )
-  ),
-
-  card(
-    card_header("Edit search structure"),
-    p("Each top-level AND component is treated as a separate substring. Labels are descriptive only, so several substrings can share the same label."),
-    uiOutput("block_editor"),
-    layout_columns(
-      col_widths = c(6, 6),
-      actionButton("apply_blocks", "Apply block edits"),
-      actionButton("add_block", "Add empty substring")
-    )
-  ),
-
-  card(
-    card_header("What is the current search missing?"),
-    uiOutput("coverage_summary"),
-    accordion(
-      accordion_panel("View missed records", DTOutput("missed_records")),
-      open = FALSE
-    )
-  ),
-
-  card(
-    card_header("Suggested improvements"),
-    p("Candidates are drawn from missed citation records and, where screening data are available, ranked using their prevalence in included versus excluded records. Select a candidate to inspect where it may fit."),
-    DTOutput("candidate_terms"),
-    uiOutput("candidate_action")
-  )
+  uiOutput("route_selector"),
+  uiOutput("route_ui"),
+  uiOutput("downstream_ui")
 )
 
 server <- function(input, output, session) {
@@ -150,6 +54,7 @@ server <- function(input, output, session) {
   baseline_coverage <- reactiveVal(NA_real_)
   benchmark_source <- reactiveVal("Not specified")
   audit_events <- reactiveVal(empty_audit_events())
+  route_mode <- reactiveVal(NULL)
 
   collect_concept_blocks <- function() {
     b <- concept_blocks()
@@ -318,13 +223,11 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$concept_search, {
+    validate(need(identical(route_mode(), "naive"), "Choose the naive-search route first."))
     validate(need(nzchar(token), "LENS_API_TOKEN is not available in the app environment."))
+    validate(need(nzchar(trimws(input$search_string)), "Enter a naive Boolean search string first."))
 
-    b <- collect_concept_blocks()
-    validate(need(!is.null(b) && nrow(b) > 0, "Add at least one substring."))
-
-    query <- rebuild_search_from_blocks(b)
-    validate(need(nzchar(query), "Enter at least one search term."))
+    query <- trimws(input$search_string)
 
     withProgress(message = "Searching Lens by relevance…", value = 0.15, {
       result <- tryCatch(
@@ -337,18 +240,18 @@ server <- function(input, output, session) {
       req(!is.null(result))
       incProgress(0.75)
 
-      concept_blocks(b)
       concept_results(result)
       if (is.null(starting_search())) starting_search(query)
-      benchmark_source("Concept-first screening")
+      benchmark_source("Naive-search screening")
       screening(init_screening(result))
       screening_index(if (nrow(result)) 1L else NA_integer_)
-      blocks(b)
-      updateTextAreaInput(session, "search_string", value = query)
+
+      parsed_blocks <- tryCatch(split_search_blocks(query), error = function(e) NULL)
+      if (!is.null(parsed_blocks)) blocks(parsed_blocks)
+
       incProgress(0.10)
     })
   })
-
 
   record_screen_decision <- function(decision) {
     s <- screening()
@@ -381,37 +284,26 @@ server <- function(input, output, session) {
     inc <- included_benchmarks(s)
     validate(need(nrow(inc) > 0, "Include at least one record first."))
 
-    summary <- screening_summary(s, input$benchmark_target)
-    validate(
-      need(
-        summary$target_met,
-        sprintf(
-          "Your benchmark target is %d; %d records are currently included.",
-          summary$target,
-          summary$include
-        )
-      )
-    )
-
     inc$ris_id <- seq_len(nrow(inc))
-    inc$match_method <- "concept screening"
+    inc$match_method <- "naive-search screening"
 
     parsed(inc)
     resolved(inc)
-    benchmark_source("Concept-first screening")
+    benchmark_source("Naive-search screening")
     citation_set(NULL)
     analysed_set(NULL)
     candidates(NULL)
 
-    shinyjs::enable("chase")
-
     showNotification(
-      sprintf("%d included records promoted to benchmarks.", nrow(inc)),
+      sprintf("%d included records selected as benchmarks. Starting citation chasing.", nrow(inc)),
       type = "message"
     )
+
+    run_citation_chase()
   })
 
   observeEvent(input$ris, {
+    validate(need(identical(route_mode(), "upload"), "Choose the benchmark-upload route first."))
     req(input$ris$datapath)
     x <- parse_ris(input$ris$datapath)
     parsed(x)
@@ -425,7 +317,6 @@ server <- function(input, output, session) {
     candidates(NULL)
     blocks(NULL)
     shinyjs::disable("chase")
-    shinyjs::disable("analyse_search")
   })
 
   observeEvent(input$resolve, {
@@ -441,7 +332,7 @@ server <- function(input, output, session) {
     shinyjs::enable("chase")
   })
 
-  observeEvent(input$chase, {
+  run_citation_chase <- function() {
     req(resolved())
     validate(need(nzchar(token), "LENS_API_TOKEN is not available in the app environment."))
 
@@ -458,9 +349,11 @@ server <- function(input, output, session) {
       citation_set(merge_citation_metadata(links, meta))
       analysed_set(NULL)
       candidates(NULL)
-      blocks(NULL)
-      shinyjs::enable("analyse_search")
     })
+  }
+
+  observeEvent(input$chase, {
+    run_citation_chase()
   })
 
   observeEvent(input$analyse_search, {
@@ -582,6 +475,202 @@ server <- function(input, output, session) {
   })
 
 
+
+  observeEvent(input$choose_naive, {
+    route_mode("naive")
+  })
+
+  observeEvent(input$choose_upload, {
+    route_mode("upload")
+  })
+
+  reset_workflow <- function() {
+    route_mode(NULL)
+    parsed(NULL)
+    resolved(NULL)
+    citation_set(NULL)
+    analysed_set(NULL)
+    candidates(NULL)
+    blocks(NULL)
+    concept_results(NULL)
+    screening(NULL)
+    screening_index(NA_integer_)
+    starting_search(NULL)
+    baseline_coverage(NA_real_)
+    benchmark_source("Not specified")
+    audit_events(empty_audit_events())
+    updateTextAreaInput(session, "search_string", value = "")
+  }
+
+  observeEvent(input$reset_workflow, {
+    reset_workflow()
+  })
+
+  output$sidebar_ui <- renderUI({
+    mode <- route_mode()
+
+    if (is.null(mode)) {
+      return(tags$p(class = "text-muted", "Choose a starting route in the main panel."))
+    }
+
+    if (identical(mode, "naive")) {
+      return(tagList(
+        textAreaInput(
+          "search_string",
+          "Naive search string",
+          value = starting_search() %||% "",
+          rows = 12,
+          placeholder = 'e.g. salmon AND farming'
+        ),
+        if (!is.null(citation_set())) {
+          tagList(
+            actionButton("analyse_search", "Check citation coverage", class = "btn-primary"),
+            uiOutput("search_check_status")
+          )
+        }
+      ))
+    }
+
+    if (is.null(citation_set())) {
+      return(tags$p(
+        class = "text-muted",
+        "Upload and citation-chase your benchmark records first. Then enter the search string you want to assess."
+      ))
+    }
+
+    tagList(
+      textAreaInput(
+        "search_string",
+        "Search string to assess",
+        rows = 12,
+        placeholder = '(concept A OR synonym*) AND ("concept B" OR term)'
+      ),
+      actionButton("analyse_search", "Check citation coverage", class = "btn-primary"),
+      uiOutput("search_check_status")
+    )
+  })
+
+  output$route_selector <- renderUI({
+    mode <- route_mode()
+
+    if (is.null(mode)) {
+      return(card(
+        card_header("How do you want to start?"),
+        p("Choose one route. The other route will stay hidden until you reset the workflow."),
+        layout_columns(
+          col_widths = c(6, 6),
+          actionButton("choose_naive", "Start with a naive search", class = "btn-primary btn-lg w-100"),
+          actionButton("choose_upload", "Upload benchmark records", class = "btn-outline-primary btn-lg w-100")
+        )
+      ))
+    }
+
+    tags$div(
+      class = "mb-3",
+      actionButton("reset_workflow", "Reset and choose another route", class = "btn-outline-secondary")
+    )
+  })
+
+  output$route_ui <- renderUI({
+    mode <- route_mode()
+    if (is.null(mode)) return(NULL)
+
+    if (identical(mode, "naive")) {
+      return(card(
+        card_header("Naive search"),
+        p("Enter a simple starting search in the Current search box, retrieve relevance-ranked Lens records, then screen them one at a time."),
+        layout_columns(
+          col_widths = c(4, 8),
+          numericInput("concept_n", "Records to retrieve", value = 500, min = 20, max = 500, step = 20),
+          actionButton("concept_search", "Search Lens", class = "btn-primary")
+        ),
+        uiOutput("concept_search_summary"),
+        uiOutput("naive_screening_panel")
+      ))
+    }
+
+    card(
+      card_header("Upload benchmark records"),
+      p("Upload known relevant records as RIS, resolve them in Lens, then run citation chasing."),
+      fileInput("ris", "Benchmark records (RIS)", accept = c(".ris", ".txt")),
+      actionButton("resolve", "Resolve benchmarks in Lens", class = "btn-primary"),
+      actionButton("chase", "Run citation chasing", disabled = TRUE),
+      uiOutput("status"),
+      accordion(
+        accordion_panel("View benchmark records", DTOutput("benchmarks")),
+        open = FALSE
+      )
+    )
+  })
+
+  output$naive_screening_panel <- renderUI({
+    if (is.null(screening())) return(NULL)
+
+    tagList(
+      tags$hr(),
+      tags$h4("Screen records"),
+      uiOutput("screening_progress"),
+      uiOutput("screening_record"),
+      layout_columns(
+        col_widths = c(3, 3, 3, 3),
+        actionButton("screen_include", "Include", class = "btn-success btn-lg"),
+        actionButton("screen_exclude", "Exclude", class = "btn-danger btn-lg"),
+        actionButton("screen_unsure", "Unsure", class = "btn-lg"),
+        actionButton("promote_benchmarks", "Use included records for citation chasing", class = "btn-primary btn-lg")
+      )
+    )
+  })
+
+  output$downstream_ui <- renderUI({
+    if (is.null(citation_set())) return(NULL)
+
+    tagList(
+      card(
+        card_header("Your improved search string"),
+        p("This is the main output. Continue refining it below, or download it when you are satisfied."),
+        uiOutput("final_search_display"),
+        layout_columns(
+          col_widths = c(6, 6),
+          downloadButton("download_final_search", "Download search string"),
+          downloadButton("download_audit", "Download audit (HTML)")
+        ),
+        uiOutput("final_search_summary")
+      ),
+      card(
+        card_header("Citation-chasing coverage"),
+        p("The app checks both backward references and forward citations from your benchmark set."),
+        uiOutput("citation_summary"),
+        accordion(
+          accordion_panel("View citation-chasing records", DTOutput("citations")),
+          open = FALSE
+        )
+      ),
+      card(
+        card_header("Edit search structure"),
+        p("Each top-level AND component is treated as a separate substring."),
+        uiOutput("block_editor"),
+        layout_columns(
+          col_widths = c(6, 6),
+          actionButton("apply_blocks", "Apply block edits"),
+          actionButton("add_block", "Add empty substring")
+        )
+      ),
+      card(
+        card_header("What is the current search missing?"),
+        uiOutput("coverage_summary"),
+        accordion(
+          accordion_panel("View missed records", DTOutput("missed_records")),
+          open = FALSE
+        )
+      ),
+      card(
+        card_header("Suggested improvements"),
+        p("Select a candidate to inspect where it may fit."),
+        DTOutput("candidate_terms"),
+        uiOutput("candidate_action")
+      )
+    )
+  })
 
   output$final_search_display <- renderUI({
     query <- input$search_string
@@ -717,7 +806,7 @@ server <- function(input, output, session) {
       return(tags$span(class = "text-muted", "No Lens sample retrieved yet."))
     }
 
-    tags$strong(sprintf("%d relevance-ranked Lens records retrieved.", nrow(x)))
+    tags$strong(sprintf("%d relevance-ranked Lens records retrieved. Screen them below one at a time.", nrow(x)))
   })
 
   output$concept_results <- renderDT({
@@ -741,30 +830,30 @@ server <- function(input, output, session) {
   output$screening_progress <- renderUI({
     s <- screening()
     if (is.null(s)) {
-      return(tags$span(class = "text-muted", "Search Lens to begin screening."))
+      return(tags$span(class = "text-muted", "Run the Lens search to begin screening."))
     }
 
-    x <- screening_summary(s, input$benchmark_target)
+    include_n <- sum(!is.na(s$decision) & s$decision == "include")
+    exclude_n <- sum(!is.na(s$decision) & s$decision == "exclude")
+    unsure_n <- sum(!is.na(s$decision) & s$decision == "unsure")
+    remaining_n <- sum(is.na(s$decision))
 
     tagList(
       tags$strong(
         sprintf(
           "%d included · %d excluded · %d unsure · %d remaining",
-          x$include, x$exclude, x$unsure, x$remaining
+          include_n, exclude_n, unsure_n, remaining_n
         )
       ),
       tags$br(),
-      if (x$target_met) {
-        tags$span(
-          class = "text-success",
-          sprintf("Benchmark target reached (%d/%d).", x$include, x$target)
-        )
-      } else {
-        tags$span(
-          class = "text-muted",
-          sprintf("%d more include decision(s) needed to reach the target.", x$target - x$include)
-        )
-      }
+      tags$span(
+        class = if (include_n > 0) "text-success" else "text-muted",
+        if (include_n > 0) {
+          "When you feel you have enough relevant records, use the included set for citation chasing."
+        } else {
+          "Include at least one relevant record before citation chasing."
+        }
+      )
     )
   })
 
