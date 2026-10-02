@@ -463,6 +463,69 @@ server <- function(input, output, session) {
     blocks(b)
   })
 
+  observeEvent(input$remove_block, {
+    b <- collect_blocks()
+    req(!is.null(b), nrow(b) > 1L)
+
+    target <- suppressWarnings(as.integer(input$remove_block_id))
+    validate(need(!is.na(target) && target %in% b$block_id, "Choose a substring to remove."))
+
+    idx <- match(target, b$block_id)
+    removed_label <- b$label[idx]
+    removed_expression <- b$expression[idx]
+
+    before_metrics <- if (!is.null(analysed_set())) {
+      coverage_metrics(analysed_set())
+    } else {
+      list(proportion = NA_real_)
+    }
+
+    b <- b[-idx, , drop = FALSE]
+    blocks(b)
+    last_add_result(NULL)
+
+    query <- rebuild_search_from_blocks(b)
+    updateTextAreaInput(session, "search_string", value = query)
+
+    if (!is.null(citation_set()) && nzchar(trimws(query))) {
+      withProgress(message = "Rechecking search after removing substring…", value = 0.2, {
+        analysed <- run_analysis(query, refresh_blocks = FALSE)
+        after_metrics <- coverage_metrics(analysed)
+
+        audit_events(
+          append_audit_event(
+            audit_events(),
+            change_type = "Substring removed",
+            search_after = query,
+            term = removed_expression,
+            target_substring = removed_label,
+            coverage_before = before_metrics$proportion,
+            coverage_after = after_metrics$proportion
+          )
+        )
+
+        incProgress(0.8)
+      })
+    } else {
+      audit_events(
+        append_audit_event(
+          audit_events(),
+          change_type = "Substring removed",
+          search_after = query,
+          term = removed_expression,
+          target_substring = removed_label,
+          coverage_before = before_metrics$proportion,
+          coverage_after = NA_real_
+        )
+      )
+    }
+
+    showNotification(
+      sprintf("Removed Substring %d · %s.", idx, removed_label),
+      type = "message"
+    )
+  })
+
   observeEvent(input$add_candidate, {
     req(candidates(), analysed_set())
 
@@ -724,9 +787,10 @@ server <- function(input, output, session) {
         p("Each top-level AND component is treated as a separate substring."),
         uiOutput("block_editor"),
         layout_columns(
-          col_widths = c(6, 6),
-          actionButton("apply_blocks", "Apply block edits"),
-          actionButton("add_block", "Add empty substring")
+          col_widths = c(4, 4, 4),
+          actionButton("apply_blocks", "Apply block edits", class = "w-100"),
+          actionButton("add_block", "Add empty substring", class = "w-100"),
+          uiOutput("remove_block_control")
         )
       ),
       card(
@@ -1344,6 +1408,38 @@ server <- function(input, output, session) {
         )
       )
     }))
+  })
+
+  output$remove_block_control <- renderUI({
+    b <- blocks()
+    if (is.null(b) || nrow(b) <= 1L) {
+      return(actionButton(
+        "remove_block_disabled",
+        "Remove substring",
+        class = "btn-outline-secondary w-100",
+        disabled = TRUE
+      ))
+    }
+
+    choices <- setNames(
+      b$block_id,
+      paste0("Substring ", seq_len(nrow(b)), " · ", b$label)
+    )
+
+    tagList(
+      selectInput(
+        "remove_block_id",
+        NULL,
+        choices = choices,
+        selected = tail(b$block_id, 1L),
+        width = "100%"
+      ),
+      actionButton(
+        "remove_block",
+        "Remove selected substring",
+        class = "btn-outline-danger w-100"
+      )
+    )
   })
 
   output$coverage_summary <- renderUI({
