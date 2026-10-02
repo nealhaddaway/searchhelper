@@ -129,7 +129,7 @@ render_audit_html <- function(
         evidence <- c(
           evidence,
           paste0(
-            "Citation-set coverage: ", fmt_pct(e$coverage_before),
+            "Citation-chasing overlap: ", fmt_pct(e$coverage_before),
             " → ", fmt_pct(e$coverage_after)
           )
         )
@@ -179,8 +179,8 @@ details{margin-top:8px}
 <div class="kpi"><strong>', benchmark_count, '</strong>benchmark records</div>
 <div class="kpi"><strong>', backward_count, '</strong>backward references</div>
 <div class="kpi"><strong>', forward_count, '</strong>forward citations</div>
-<div class="kpi"><strong>', fmt_pct(baseline_coverage), '</strong>baseline citation-set coverage</div>
-<div class="kpi"><strong>', fmt_pct(final_coverage), '</strong>final citation-set coverage</div>
+<div class="kpi"><strong>', fmt_pct(baseline_coverage), '</strong>baseline citation-chasing overlap</div>
+<div class="kpi"><strong>', fmt_pct(final_coverage), '</strong>final citation-chasing overlap</div>
 </div>
 <p><strong>Benchmark source:</strong> ', benchmark_source, '</p>
 
@@ -191,7 +191,7 @@ details{margin-top:8px}
 ', event_html, '
 
 <h2>Interpretation</h2>
-<p>This audit documents how the search string was developed using benchmark records, citation chasing and user-accepted revisions. Coverage figures refer to the non-benchmark citation-chasing records available during this session and should not be interpreted as proof of complete literature retrieval.</p>
+<p>This audit documents how the search string was developed using benchmark records, citation chasing and user-accepted revisions. Citation-chasing overlap is descriptive: unmatched citation records are used as a term-mining pool, are not assumed relevant, and are not a recall target. These figures should not be interpreted as proof of complete literature retrieval.</p>
 </body>
 </html>'
   )
