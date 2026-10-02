@@ -8,6 +8,7 @@ source("R/boolean_match.R")
 source("R/term_mining.R")
 source("R/search_blocks.R")
 source("R/suggestions.R")
+source("R/screening.R")
 
 ui <- page_sidebar(
   title = "Search Helper",
@@ -39,7 +40,21 @@ ui <- page_sidebar(
     ),
     uiOutput("concept_query_preview"),
     uiOutput("concept_search_summary"),
-    DTOutput("concept_results")
+    DTOutput("concept_results"),
+    tags$hr(),
+    layout_columns(
+      col_widths = c(4, 8),
+      numericInput("benchmark_target", "Benchmark target", value = 20, min = 1, max = 500, step = 1),
+      uiOutput("screening_progress")
+    ),
+    uiOutput("screening_record"),
+    layout_columns(
+      col_widths = c(3, 3, 3, 3),
+      actionButton("screen_include", "Include", class = "btn-success"),
+      actionButton("screen_exclude", "Exclude", class = "btn-danger"),
+      actionButton("screen_unsure", "Unsure"),
+      actionButton("promote_benchmarks", "Use included as benchmarks", class = "btn-primary")
+    )
   ),
 
   card(
@@ -96,6 +111,8 @@ server <- function(input, output, session) {
     stringsAsFactors = FALSE
   ))
   concept_results <- reactiveVal(NULL)
+  screening <- reactiveVal(NULL)
+  screening_index <- reactiveVal(NA_integer_)
 
   collect_concept_blocks <- function() {
     b <- concept_blocks()
@@ -214,10 +231,73 @@ server <- function(input, output, session) {
 
       concept_blocks(b)
       concept_results(result)
+      screening(init_screening(result))
+      screening_index(if (nrow(result)) 1L else NA_integer_)
       blocks(b)
       updateTextAreaInput(session, "search_string", value = query)
       incProgress(0.10)
     })
+  })
+
+
+  record_screen_decision <- function(decision) {
+    s <- screening()
+    idx <- screening_index()
+    req(!is.null(s), nrow(s) > 0, !is.na(idx))
+
+    s <- set_screen_decision(s, idx, decision)
+    screening(s)
+
+    next_idx <- next_unscreened_index(s, after = idx)
+    screening_index(next_idx)
+  }
+
+  observeEvent(input$screen_include, {
+    record_screen_decision("include")
+  })
+
+  observeEvent(input$screen_exclude, {
+    record_screen_decision("exclude")
+  })
+
+  observeEvent(input$screen_unsure, {
+    record_screen_decision("unsure")
+  })
+
+  observeEvent(input$promote_benchmarks, {
+    s <- screening()
+    req(!is.null(s), nrow(s) > 0)
+
+    inc <- included_benchmarks(s)
+    validate(need(nrow(inc) > 0, "Include at least one record first."))
+
+    summary <- screening_summary(s, input$benchmark_target)
+    validate(
+      need(
+        summary$target_met,
+        sprintf(
+          "Your benchmark target is %d; %d records are currently included.",
+          summary$target,
+          summary$include
+        )
+      )
+    )
+
+    inc$ris_id <- seq_len(nrow(inc))
+    inc$match_method <- "concept screening"
+
+    parsed(inc)
+    resolved(inc)
+    citation_set(NULL)
+    analysed_set(NULL)
+    candidates(NULL)
+
+    shinyjs::enable("chase")
+
+    showNotification(
+      sprintf("%d included records promoted to benchmarks.", nrow(inc)),
+      type = "message"
+    )
   })
 
   observeEvent(input$ris, {
@@ -415,6 +495,71 @@ server <- function(input, output, session) {
       rownames = FALSE,
       selection = "none",
       options = list(pageLength = 20, scrollX = TRUE)
+    )
+  })
+
+
+  output$screening_progress <- renderUI({
+    s <- screening()
+    if (is.null(s)) {
+      return(tags$span(class = "text-muted", "Search Lens to begin screening."))
+    }
+
+    x <- screening_summary(s, input$benchmark_target)
+
+    tagList(
+      tags$strong(
+        sprintf(
+          "%d included · %d excluded · %d unsure · %d remaining",
+          x$include, x$exclude, x$unsure, x$remaining
+        )
+      ),
+      tags$br(),
+      if (x$target_met) {
+        tags$span(
+          class = "text-success",
+          sprintf("Benchmark target reached (%d/%d).", x$include, x$target)
+        )
+      } else {
+        tags$span(
+          class = "text-muted",
+          sprintf("%d more include decision(s) needed to reach the target.", x$target - x$include)
+        )
+      }
+    )
+  })
+
+  output$screening_record <- renderUI({
+    s <- screening()
+    idx <- screening_index()
+
+    if (is.null(s) || !nrow(s)) {
+      return(tags$span(class = "text-muted", "No records available for screening."))
+    }
+
+    if (is.na(idx)) {
+      return(tags$div(
+        class = "alert alert-success",
+        "All retrieved records have been screened."
+      ))
+    }
+
+    r <- s[idx, , drop = FALSE]
+
+    tags$div(
+      class = "border rounded p-3 mb-3",
+      tags$div(
+        class = "text-muted",
+        sprintf("Record %d of %d · Lens relevance rank %s", idx, nrow(s), r$rank)
+      ),
+      tags$h4(r$title),
+      tags$p(tags$strong("Authors: "), ifelse(is.na(r$authors), "", r$authors)),
+      tags$p(tags$strong("Year: "), ifelse(is.na(r$year), "", r$year)),
+      if (!is.na(r$keywords) && nzchar(r$keywords)) {
+        tags$p(tags$strong("Keywords: "), r$keywords)
+      },
+      tags$hr(),
+      tags$p(ifelse(is.na(r$abstract) || !nzchar(r$abstract), "No abstract available.", r$abstract))
     )
   })
 
