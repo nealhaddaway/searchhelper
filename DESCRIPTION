@@ -1,0 +1,13 @@
+Package: searchhelper
+Title: Search Helper Shiny Application
+Version: 0.0.0.9000
+Authors@R: person("Neal", "Haddaway", role = c("aut", "cre"))
+Description: Interactive support for developing transparent, benchmark-informed systematic-map search strategies.
+License: MIT
+Encoding: UTF-8
+Imports:
+    shiny,
+    bslib,
+    DT,
+    httr2,
+    shinyjs
