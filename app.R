@@ -461,7 +461,8 @@ server <- function(input, output, session) {
 
     withProgress(message = "Rechecking search after adding selected terms…", value = 0.2, {
       analysed <- run_analysis(query, refresh_blocks = FALSE)
-      after <- coverage_metrics(analysed)$proportion
+      after_metrics <- coverage_metrics(analysed)
+      after <- after_metrics$proportion
 
       events <- audit_events()
       for (i in seq_len(nrow(cand))) {
