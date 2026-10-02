@@ -23,17 +23,8 @@ ui <- page_sidebar(
     .help-note { font-size: .9rem; color: var(--bs-secondary-color); margin-top: .5rem; }
   "))),
   sidebar = sidebar(
-    title = "Current search",
-    textAreaInput(
-      "search_string",
-      "Search string",
-      rows = 12,
-      placeholder = '(concept A OR synonym*) AND ("concept B" OR term)'
-    ),
-    actionButton("analyse_search", "Check citation coverage", disabled = TRUE),
-    uiOutput("search_check_status"),
-    hr(),
-    tags$p(class = "text-muted small", "Already have known relevant papers? Upload them below in Start with benchmark records.")
+    title = "Search",
+    uiOutput("sidebar_ui")
   ),
 
   uiOutput("route_selector"),
@@ -326,7 +317,6 @@ server <- function(input, output, session) {
     candidates(NULL)
     blocks(NULL)
     shinyjs::disable("chase")
-    shinyjs::disable("analyse_search")
   })
 
   observeEvent(input$resolve, {
@@ -359,7 +349,6 @@ server <- function(input, output, session) {
       citation_set(merge_citation_metadata(links, meta))
       analysed_set(NULL)
       candidates(NULL)
-      shinyjs::enable("analyse_search")
     })
   }
 
@@ -511,11 +500,53 @@ server <- function(input, output, session) {
     benchmark_source("Not specified")
     audit_events(empty_audit_events())
     updateTextAreaInput(session, "search_string", value = "")
-    shinyjs::disable("analyse_search")
   }
 
   observeEvent(input$reset_workflow, {
     reset_workflow()
+  })
+
+  output$sidebar_ui <- renderUI({
+    mode <- route_mode()
+
+    if (is.null(mode)) {
+      return(tags$p(class = "text-muted", "Choose a starting route in the main panel."))
+    }
+
+    if (identical(mode, "naive")) {
+      return(tagList(
+        textAreaInput(
+          "search_string",
+          "Naive search string",
+          rows = 12,
+          placeholder = 'e.g. salmon AND farming'
+        ),
+        if (!is.null(citation_set())) {
+          tagList(
+            actionButton("analyse_search", "Check citation coverage", class = "btn-primary"),
+            uiOutput("search_check_status")
+          )
+        }
+      ))
+    }
+
+    if (is.null(citation_set())) {
+      return(tags$p(
+        class = "text-muted",
+        "Upload and citation-chase your benchmark records first. Then enter the search string you want to assess."
+      ))
+    }
+
+    tagList(
+      textAreaInput(
+        "search_string",
+        "Search string to assess",
+        rows = 12,
+        placeholder = '(concept A OR synonym*) AND ("concept B" OR term)'
+      ),
+      actionButton("analyse_search", "Check citation coverage", class = "btn-primary"),
+      uiOutput("search_check_status")
+    )
   })
 
   output$route_selector <- renderUI({
