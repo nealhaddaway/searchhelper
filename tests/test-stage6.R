@@ -1,5 +1,7 @@
 source("R/boolean_match.R")
 source("R/term_mining.R")
+source("R/search_blocks.R")
+source("R/suggestions.R")
 
 missed <- data.frame(
   title = c(
@@ -66,3 +68,20 @@ stopifnot(nrow(fallback) > 0)
 stopifnot(!fallback$discrimination_available[1])
 
 cat("Stage 6 discriminative ranking tests passed.\n")
+
+
+blocks <- data.frame(
+  block_id = 1:2,
+  label = c("Population", "Intervention or exposure"),
+  expression = c("salmon*", "aquacultur*"),
+  stringsAsFactors = FALSE
+)
+
+gain <- best_candidate_gain(
+  records = missed,
+  blocks = blocks,
+  candidate = "mariculture",
+  type = "term"
+)
+stopifnot(gain$block_id == 2L)
+stopifnot(gain$gain == 2L)
