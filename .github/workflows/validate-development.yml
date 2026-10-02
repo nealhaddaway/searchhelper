@@ -80,3 +80,26 @@ jobs:
               raise SystemExit("Lens API returned HTTP 200 but no scholarly record.")
           print("Lens API smoke test passed.")
           PY
+
+
+      - name: Lens ranked-search helper smoke test
+        shell: bash
+        env:
+          LENS_API_TOKEN: ${{ secrets.LENS_API_TOKEN }}
+        run: |
+          Rscript - <<'RS'
+          needed <- c("httr2", "jsonlite")
+          missing <- needed[!vapply(needed, requireNamespace, logical(1), quietly = TRUE)]
+          if (length(missing)) install.packages(missing)
+          source("R/boolean_match.R")
+          source("R/lens_api.R")
+          token <- Sys.getenv("LENS_API_TOKEN")
+          x <- lens_ranked_search(
+            '(salmon* OR "rainbow trout") AND (aquacultur* OR farm*)',
+            token,
+            size = 5L
+          )
+          stopifnot(nrow(x) > 0L)
+          stopifnot(all(c("rank", "lens_id", "title") %in% names(x)))
+          cat(sprintf("Ranked helper passed with %d records.\n", nrow(x)))
+          RS

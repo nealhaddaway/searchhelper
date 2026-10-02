@@ -10,7 +10,26 @@ lens_post <- function(body, token) {
       max_tries = 5,
       is_transient = function(resp) httr2::resp_status(resp) %in% c(429, 500, 502, 503, 504)
     ) |>
+    httr2::req_error(
+      is_error = function(resp) FALSE
+    ) |>
     httr2::req_perform()
+
+  status <- httr2::resp_status(resp)
+  if (status >= 400) {
+    body_text <- tryCatch(
+      httr2::resp_body_string(resp),
+      error = function(e) ""
+    )
+    stop(
+      sprintf(
+        "Lens API returned HTTP %d%s",
+        status,
+        if (nzchar(body_text)) paste0(": ", body_text) else "."
+      ),
+      call. = FALSE
+    )
+  }
 
   httr2::resp_body_json(resp, simplifyVector = FALSE)
 }
@@ -240,9 +259,7 @@ lens_ranked_search <- function(query, token, size = 500L) {
       "keywords",
       "authors",
       "year_published",
-      "external_ids",
-      "scholarly_citations_count",
-      "reference_count"
+      "external_ids"
     )
   )
 
