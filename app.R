@@ -349,6 +349,19 @@ server <- function(input, output, session) {
       citation_set(merge_citation_metadata(links, meta))
       analysed_set(NULL)
       candidates(NULL)
+
+      query <- trimws(input$search_string %||% "")
+      if (!nzchar(query) && !is.null(starting_search())) {
+        query <- trimws(starting_search())
+      }
+
+      if (nzchar(query)) {
+        incProgress(0.05, detail = "Identifying candidate terms…")
+        analysed <- run_analysis(query, refresh_blocks = TRUE)
+        if (is.na(baseline_coverage())) {
+          baseline_coverage(coverage_metrics(analysed)$proportion)
+        }
+      }
     })
   }
 
@@ -524,7 +537,7 @@ server <- function(input, output, session) {
         ),
         if (!is.null(citation_set())) {
           tagList(
-            actionButton("analyse_search", "Check citation coverage", class = "btn-primary"),
+            actionButton("analyse_search", "Reidentify candidate terms", class = "btn-primary"),
             uiOutput("search_check_status")
           )
         }
@@ -545,7 +558,7 @@ server <- function(input, output, session) {
         rows = 12,
         placeholder = '(concept A OR synonym*) AND ("concept B" OR term)'
       ),
-      actionButton("analyse_search", "Check citation coverage", class = "btn-primary"),
+      actionButton("analyse_search", "Reidentify candidate terms", class = "btn-primary"),
       uiOutput("search_check_status")
     )
   })
@@ -626,24 +639,15 @@ server <- function(input, output, session) {
 
     tagList(
       card(
-        card_header("Your improved search string"),
-        p("This is the main output. Continue refining it below, or download it when you are satisfied."),
-        uiOutput("final_search_display"),
-        layout_columns(
-          col_widths = c(6, 6),
-          downloadButton("download_final_search", "Download search string"),
-          downloadButton("download_audit", "Download audit (HTML)")
-        ),
-        uiOutput("final_search_summary")
+        card_header("Candidate terms for your search"),
+        p("These terms are mined from citation-chasing records that your current search missed. Select a candidate to inspect where it may fit and add it only if you judge it useful."),
+        uiOutput("candidate_terms_status"),
+        DTOutput("candidate_terms"),
+        uiOutput("candidate_action")
       ),
       card(
-        card_header("Citation-chasing coverage"),
-        p("The app checks both backward references and forward citations from your benchmark set."),
-        uiOutput("citation_summary"),
-        accordion(
-          accordion_panel("View citation-chasing records", DTOutput("citations")),
-          open = FALSE
-        )
+        card_header("Search coverage"),
+        uiOutput("coverage_summary")
       ),
       card(
         card_header("Edit search structure"),
@@ -656,21 +660,41 @@ server <- function(input, output, session) {
         )
       ),
       card(
-        card_header("What is the current search missing?"),
-        uiOutput("coverage_summary"),
-        accordion(
-          accordion_panel("View missed records", DTOutput("missed_records")),
-          open = FALSE
-        )
-      ),
-      card(
-        card_header("Suggested improvements"),
-        p("Select a candidate to inspect where it may fit."),
-        DTOutput("candidate_terms"),
-        uiOutput("candidate_action")
+        card_header("Your improved search string"),
+        p("Continue refining the search above, or download it when you are satisfied."),
+        uiOutput("final_search_display"),
+        layout_columns(
+          col_widths = c(6, 6),
+          downloadButton("download_final_search", "Download search string"),
+          downloadButton("download_audit", "Download audit (HTML)")
+        ),
+        uiOutput("final_search_summary")
       )
     )
   })
+
+  output$candidate_terms_status <- renderUI({
+    if (is.null(analysed_set())) {
+      return(tags$div(
+        class = "alert alert-info",
+        "Enter the search string you want to assess in the sidebar, then identify candidate terms."
+      ))
+    }
+
+    x <- analysed_set()
+    missed <- sum(x$candidate_source)
+    total <- sum(!x$is_benchmark)
+    n_candidates <- if (is.null(candidates())) 0L else nrow(candidates())
+
+    tags$div(
+      tags$strong(sprintf("%d candidate terms identified.", n_candidates)),
+      tags$span(sprintf(
+        " They are derived from %d citation-chasing records missed by the current search, out of %d non-benchmark citation records assessed.",
+        missed, total
+      ))
+    )
+  })
+
 
   output$final_search_display <- renderUI({
     query <- input$search_string
@@ -694,7 +718,7 @@ server <- function(input, output, session) {
 
     tags$div(
       class = "help-note",
-      "Ready to compare this search against the citation-chasing set."
+      "Ready to reanalyse the citation-chasing set and update candidate terms."
     )
   })
 
