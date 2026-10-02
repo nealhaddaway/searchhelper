@@ -120,44 +120,24 @@ server <- function(input, output, session) {
       data.frame()
     }
 
-    ranked <- rank_discriminative_candidates(
-      missed_records = missed,
-      included_records = included,
-      excluded_records = excluded,
+    ranked <- mine_candidate_terms(
+      records = missed,
       query = query,
       top_n = 250L
     )
 
-    current_blocks <- if (!is.null(blocks()) && nrow(blocks())) {
-      blocks()
-    } else {
-      tryCatch(split_search_blocks(query), error = function(e) NULL)
-    }
-
     if (nrow(ranked)) {
-      if (all(ranked$discrimination_available)) {
-        ranked <- ranked[
-          order(
-            -ranked$log2_enrichment,
-            -ranked$missed_gain,
-            -ranked$keyword_records,
-            ranked$candidate,
-            na.last = TRUE
-          ),
-          ,
-          drop = FALSE
-        ]
-      } else {
-        ranked <- ranked[
-          order(
-            -ranked$missed_gain,
-            -ranked$keyword_records,
-            ranked$candidate
-          ),
-          ,
-          drop = FALSE
-        ]
-      }
+      ranked$missed_gain <- ranked$n_records
+      ranked <- ranked[
+        order(
+          -ranked$missed_gain,
+          -ranked$keyword_records,
+          -ranked$occurrences,
+          ranked$candidate
+        ),
+        ,
+        drop = FALSE
+      ]
       rownames(ranked) <- NULL
     }
 
@@ -324,12 +304,13 @@ server <- function(input, output, session) {
     ids <- unique(na.omit(resolved()$lens_id))
     validate(need(length(ids) > 0, "No benchmark records were resolved to Lens IDs."))
 
-    withProgress(message = "Retrieving forward and backward citation links…", value = 0.1, {
+    withProgress(message = "Citation chasing", value = 0.05, {
+      incProgress(0.05, detail = "Retrieving forward and backward citation links…")
       links <- lens_get_citation_links(ids, token)
-      incProgress(0.45)
+      incProgress(0.40, detail = "Retrieving citation record metadata from Lens…")
 
       meta <- lens_fetch_records(unique(links$cited_lens_id), token)
-      incProgress(0.45)
+      incProgress(0.35, detail = "Comparing citation records with the current search…")
 
       citation_set(merge_citation_metadata(links, meta))
       analysed_set(NULL)
@@ -341,7 +322,7 @@ server <- function(input, output, session) {
       }
 
       if (nzchar(query)) {
-        incProgress(0.05, detail = "Identifying candidate terms…")
+        incProgress(0.10, detail = "Mining candidate terms from missed records…")
         analysed <- run_analysis(query, refresh_blocks = TRUE)
         if (is.na(baseline_coverage())) {
           baseline_coverage(coverage_metrics(analysed)$proportion)
