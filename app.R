@@ -7,6 +7,7 @@ source("R/lens_api.R")
 source("R/boolean_match.R")
 source("R/term_mining.R")
 source("R/term_sources.R")
+source("R/morphology_check.R")
 source("R/search_blocks.R")
 source("R/suggestions.R")
 source("R/screening.R")
@@ -729,6 +730,11 @@ server <- function(input, output, session) {
         )
       ),
       card(
+        card_header("Morphology and truncation check"),
+        p("Checks the current search for obvious missing English inflections and possible truncation opportunities. Suggestions are advisory and never change the search automatically."),
+        uiOutput("morphology_check")
+      ),
+      card(
         card_header("Your improved search string"),
         p("Continue refining the search above, or download it when you are satisfied."),
         uiOutput("final_search_display"),
@@ -881,12 +887,16 @@ server <- function(input, output, session) {
     validate(need(!is.na(target) && target %in% b$block_id, "Choose a target substring."))
 
     idx <- match(target, b$block_id)
+    target_label <- b$label[idx]
     selected_terms <- x[selected, , drop = FALSE]
 
     additions <- vapply(seq_len(nrow(selected_terms)), function(i) {
       term <- selected_terms$candidate[i]
       if (grepl(" ", term, fixed = TRUE)) paste0('"', term, '"') else term
     }, character(1))
+
+    before_metrics <- coverage_metrics(analysed_set())
+    before <- before_metrics$proportion
 
     for (addition in additions) {
       b$expression[idx] <- add_or_to_block(b$expression[idx], addition)
@@ -898,6 +908,44 @@ server <- function(input, output, session) {
 
     withProgress(message = "Updating search after adding external suggestions…", value = 0.2, {
       analysed <- run_analysis(query, refresh_blocks = FALSE)
+      after_metrics <- coverage_metrics(analysed)
+      after <- after_metrics$proportion
+
+      events <- audit_events()
+      for (i in seq_len(nrow(selected_terms))) {
+        events <- append_audit_event(
+          events,
+          change_type = "External lexical suggestion added",
+          search_after = query,
+          term = selected_terms$candidate[[i]],
+          target_substring = target_label,
+          syntax = additions[[i]],
+          incremental_recovery = NA_integer_,
+          included_prevalence = NA_real_,
+          excluded_prevalence = NA_real_,
+          log2_enrichment = NA_real_,
+          coverage_before = before,
+          coverage_after = after
+        )
+      }
+      audit_events(events)
+
+      last_add_result(list(
+        n_terms = length(additions),
+        additions = additions,
+        target_label = target_label,
+        target_index = idx,
+        target_expression = b$expression[idx],
+        query = query,
+        before_captured = before_metrics$captured,
+        before_total = before_metrics$total,
+        before_proportion = before_metrics$proportion,
+        after_captured = after_metrics$captured,
+        after_total = after_metrics$total,
+        after_proportion = after_metrics$proportion,
+        remaining_missed = sum(analysed$candidate_source, na.rm = TRUE)
+      ))
+
       incProgress(0.8)
     })
 
@@ -934,6 +982,51 @@ server <- function(input, output, session) {
     )
   })
 
+
+  output$morphology_check <- renderUI({
+    query <- trimws(input$search_string %||% "")
+    if (!nzchar(query)) {
+      return(tags$span(class = "text-muted", "Enter a search string to run this check."))
+    }
+
+    checks <- tryCatch(
+      search_morphology_checks(query),
+      error = function(e) data.frame()
+    )
+
+    if (is.null(checks) || !nrow(checks)) {
+      return(tags$div(
+        class = "alert alert-success mb-0",
+        "No obvious missing inflections or truncation opportunities were detected."
+      ))
+    }
+
+    rows <- lapply(seq_len(nrow(checks)), function(i) {
+      tags$tr(
+        tags$td(tags$code(checks$family[i])),
+        tags$td(checks$present[i]),
+        tags$td(checks$missing[i]),
+        tags$td(tags$code(checks$suggestion[i]))
+      )
+    })
+
+    tagList(
+      tags$div(
+        class = "alert alert-warning",
+        "Possible morphology gaps detected. A truncation such as farm* may retrieve additional words beyond the listed inflections, so check database-specific behaviour before using it."
+      ),
+      tags$table(
+        class = "table table-sm align-middle mb-0",
+        tags$thead(tags$tr(
+          tags$th("Family"),
+          tags$th("Present"),
+          tags$th("Missing common forms"),
+          tags$th("Consider")
+        )),
+        tags$tbody(rows)
+      )
+    )
+  })
 
   output$final_search_display <- renderUI({
     query <- input$search_string
