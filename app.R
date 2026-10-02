@@ -4,6 +4,8 @@ library(DT)
 
 source("R/ris.R")
 source("R/lens_api.R")
+source("R/boolean_match.R")
+source("R/term_mining.R")
 
 ui <- page_sidebar(
   title = "Search Helper",
@@ -13,6 +15,7 @@ ui <- page_sidebar(
                   placeholder = '(concept A OR synonym*) AND ("concept B" OR term)'),
     actionButton("resolve", "Resolve benchmarks in Lens", class = "btn-primary"),
     actionButton("chase", "Run citation chasing", disabled = TRUE),
+    actionButton("analyse_search", "Analyse draft search", disabled = TRUE),
     hr(),
     downloadButton("download_citations", "Download citation set (CSV)")
   ),
@@ -26,6 +29,16 @@ ui <- page_sidebar(
     card_header("Citation chasing"),
     uiOutput("citation_summary"),
     DTOutput("citations")
+  ),
+  card(
+    card_header("Draft-search coverage"),
+    uiOutput("coverage_summary"),
+    DTOutput("missed_records")
+  ),
+  card(
+    card_header("Candidate terms from missed records"),
+    p("Ranked by the number of missed records containing each term or phrase. Existing search terms and common English stop words are excluded."),
+    DTOutput("candidate_terms")
   )
 )
 
@@ -34,6 +47,8 @@ server <- function(input, output, session) {
   parsed <- reactiveVal(NULL)
   resolved <- reactiveVal(NULL)
   citation_set <- reactiveVal(NULL)
+  analysed_set <- reactiveVal(NULL)
+  candidates <- reactiveVal(NULL)
 
   observeEvent(input$ris, {
     req(input$ris$datapath)
@@ -41,6 +56,8 @@ server <- function(input, output, session) {
     parsed(x)
     resolved(NULL)
     citation_set(NULL)
+    analysed_set(NULL)
+    candidates(NULL)
   })
 
   observeEvent(input$resolve, {
@@ -65,6 +82,37 @@ server <- function(input, output, session) {
       meta <- lens_fetch_records(unique(links$cited_lens_id), token)
       incProgress(0.45)
       citation_set(merge_citation_metadata(links, meta))
+      analysed_set(NULL)
+      candidates(NULL)
+      shinyjs::enable("analyse_search")
+    })
+  })
+
+  observeEvent(input$analyse_search, {
+    req(citation_set())
+    validate(need(nzchar(trimws(input$search_string)), "Enter a draft Boolean search string first."))
+
+    withProgress(message = "Checking draft-search coverage…", value = 0.2, {
+      x <- citation_set()
+      matches <- tryCatch(
+        match_search_records(x, input$search_string),
+        error = function(e) {
+          showNotification(conditionMessage(e), type = "error", duration = NULL)
+          NULL
+        }
+      )
+      req(!is.null(matches))
+      x$search_match <- matches
+
+      benchmark_ids <- unique(na.omit(resolved()$lens_id))
+      x$is_benchmark <- x$lens_id %in% benchmark_ids
+      x$candidate_source <- !x$search_match & !x$is_benchmark
+      analysed_set(x)
+
+      incProgress(0.4)
+      missed <- x[x$candidate_source, , drop = FALSE]
+      candidates(mine_candidate_terms(missed, input$search_string, top_n = 250L))
+      incProgress(0.4)
     })
   })
 
@@ -101,6 +149,40 @@ server <- function(input, output, session) {
   output$citations <- renderDT({
     req(citation_set())
     datatable(citation_set(), rownames = FALSE, options = list(pageLength = 15, scrollX = TRUE))
+  })
+
+  output$coverage_summary <- renderUI({
+    x <- analysed_set()
+    if (is.null(x)) {
+      return(tags$span(class = "text-muted", "Run citation chasing, then analyse the draft search."))
+    }
+
+    eligible <- !x$is_benchmark
+    total <- sum(eligible)
+    captured <- sum(x$search_match & eligible)
+    missed <- sum(x$candidate_source)
+    pct <- if (total > 0) 100 * captured / total else NA_real_
+
+    tags$div(
+      tags$strong(sprintf("%d of %d non-benchmark citation records matched locally", captured, total)),
+      if (is.finite(pct)) tags$span(sprintf(" (%.1f%%).", pct)),
+      tags$span(sprintf(" %d records remain for candidate-term discovery.", missed))
+    )
+  })
+
+  output$missed_records <- renderDT({
+    req(analysed_set())
+    x <- analysed_set()
+    x <- x[x$candidate_source, , drop = FALSE]
+    keep <- intersect(c("lens_id", "title", "year", "authors", "doi", "keywords", "direction"), names(x))
+    datatable(x[, keep, drop = FALSE], rownames = FALSE,
+              options = list(pageLength = 10, scrollX = TRUE))
+  })
+
+  output$candidate_terms <- renderDT({
+    req(candidates())
+    datatable(candidates(), rownames = FALSE,
+              options = list(pageLength = 20, scrollX = TRUE))
   })
 
   output$download_citations <- downloadHandler(
