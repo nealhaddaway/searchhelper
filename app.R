@@ -15,15 +15,22 @@ ui <- page_sidebar(
   title = "Search Helper",
   theme = bslib::bs_theme(version = 5, bootswatch = "flatly"),
   shinyjs::useShinyjs(),
+  tags$head(tags$style(HTML("
+    textarea.form-control { min-height: 130px; resize: vertical; font-size: 1rem; line-height: 1.45; }
+    .search-block { background: var(--bs-body-bg); }
+    .search-output { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 1rem; line-height: 1.5; background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: 1rem; }
+    .help-note { font-size: .9rem; color: var(--bs-secondary-color); margin-top: .5rem; }
+  "))),
   sidebar = sidebar(
     title = "Current search",
     textAreaInput(
       "search_string",
       "Search string",
-      rows = 8,
+      rows = 12,
       placeholder = '(concept A OR synonym*) AND ("concept B" OR term)'
     ),
-    actionButton("analyse_search", "Check current search", disabled = TRUE),
+    actionButton("analyse_search", "Check citation coverage", disabled = TRUE),
+    uiOutput("search_check_status"),
     hr(),
     tags$p(class = "text-muted small", "Already have known relevant papers? Upload them below in Start with benchmark records.")
   ),
@@ -31,7 +38,7 @@ ui <- page_sidebar(
   card(
     card_header("Your improved search string"),
     p("This is the main output. Continue refining it below, or download it when you are satisfied."),
-    textAreaInput("final_search_display", NULL, value = "", rows = 8, width = "100%"),
+    uiOutput("final_search_display"),
     layout_columns(
       col_widths = c(6, 6),
       downloadButton("download_final_search", "Download search string"),
@@ -462,7 +469,6 @@ server <- function(input, output, session) {
       if (is.na(baseline_coverage())) {
         baseline_coverage(coverage_metrics(analysed)$proportion)
       }
-      updateTextAreaInput(session, "final_search_display", value = input$search_string)
       incProgress(0.8)
     })
   })
@@ -490,7 +496,6 @@ server <- function(input, output, session) {
         )
       )
 
-      updateTextAreaInput(session, "final_search_display", value = query)
       incProgress(0.8)
     })
   })
@@ -571,7 +576,6 @@ server <- function(input, output, session) {
         )
       )
 
-      updateTextAreaInput(session, "final_search_display", value = query)
       incProgress(0.8)
     })
   })
@@ -581,7 +585,6 @@ server <- function(input, output, session) {
   observe({
     query <- input$search_string
     if (!is.null(query) && nzchar(query)) {
-      updateTextAreaInput(session, "final_search_display", value = query)
     }
   })
 
@@ -650,8 +653,9 @@ server <- function(input, output, session) {
     )
 
     tagList(lapply(seq_len(nrow(b)), function(i) {
-      card(
-        card_header(sprintf("Substring %d", i)),
+      tags$div(
+        class = "search-block border rounded p-3 mb-3",
+        tags$h5(sprintf("Substring %d", i)),
         selectizeInput(
           paste0("concept_label_", i),
           "Label",
@@ -663,7 +667,8 @@ server <- function(input, output, session) {
           paste0("concept_expr_", i),
           "Terms / Boolean expression",
           value = b$expression[i],
-          rows = 3,
+          rows = 5,
+          width = "100%",
           placeholder = 'e.g. salmon* OR "rainbow trout"'
         )
       )
@@ -851,8 +856,9 @@ server <- function(input, output, session) {
     )
 
     tagList(lapply(seq_len(nrow(b)), function(i) {
-      card(
-        card_header(sprintf("Substring %d", i)),
+      tags$div(
+        class = "search-block border rounded p-3 mb-3",
+        tags$h5(sprintf("Substring %d", i)),
         selectizeInput(
           paste0("block_label_", i),
           "Label",
@@ -864,7 +870,8 @@ server <- function(input, output, session) {
           paste0("block_expr_", i),
           "Boolean expression",
           value = b$expression[i],
-          rows = 3
+          rows = 5,
+          width = "100%"
         )
       )
     }))
