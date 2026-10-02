@@ -422,7 +422,7 @@ server <- function(input, output, session) {
     req(candidates(), analysed_set())
 
     selected <- input$candidate_terms_rows_selected
-    validate(need(length(selected) == 1L, "Select one candidate term first."))
+    validate(need(length(selected) >= 1L, "Select at least one candidate term first."))
 
     cand <- candidates()[selected, , drop = FALSE]
     b <- collect_blocks()
@@ -431,47 +431,56 @@ server <- function(input, output, session) {
     target <- suppressWarnings(as.integer(input$candidate_block))
     validate(need(!is.na(target) && target %in% b$block_id, "Choose a target substring."))
 
-    addition <- input$candidate_form
-    validate(need(!is.null(addition) && nzchar(addition), "Choose how to add the candidate."))
+    additions <- vapply(seq_len(nrow(cand)), function(i) {
+      if (identical(cand$type[i], "phrase")) {
+        paste0('"', cand$candidate[i], '"')
+      } else {
+        cand$candidate[i]
+      }
+    }, character(1))
 
     before <- coverage_metrics(analysed_set())$proportion
     idx <- match(target, b$block_id)
     target_label <- b$label[idx]
-    b$expression[idx] <- add_or_to_block(b$expression[idx], addition)
+
+    for (addition in additions) {
+      b$expression[idx] <- add_or_to_block(b$expression[idx], addition)
+    }
     blocks(b)
 
     query <- rebuild_search_from_blocks(b)
     updateTextAreaInput(session, "search_string", value = query)
 
-    withProgress(message = "Rechecking search after adding candidate…", value = 0.2, {
+    withProgress(message = "Rechecking search after adding selected terms…", value = 0.2, {
       analysed <- run_analysis(query, refresh_blocks = FALSE)
       after <- coverage_metrics(analysed)$proportion
 
-      get_value <- function(name, default = NA) {
-        if (name %in% names(cand)) cand[[name]][[1]] else default
-      }
+      events <- audit_events()
+      for (i in seq_len(nrow(cand))) {
+        get_value <- function(name, default = NA) {
+          if (name %in% names(cand)) cand[[name]][[i]] else default
+        }
 
-      audit_events(
-        append_audit_event(
-          audit_events(),
+        events <- append_audit_event(
+          events,
           change_type = "Candidate term added",
           search_after = query,
-          term = cand$candidate[[1]],
+          term = cand$candidate[[i]],
           target_substring = target_label,
-          syntax = addition,
-          incremental_recovery = get_value("incremental_recovery", NA_integer_),
+          syntax = additions[[i]],
+          incremental_recovery = NA_integer_,
           included_prevalence = get_value("included_prevalence", NA_real_),
           excluded_prevalence = get_value("excluded_prevalence", NA_real_),
           log2_enrichment = get_value("log2_enrichment", NA_real_),
           coverage_before = before,
           coverage_after = after
         )
-      )
+      }
+      audit_events(events)
 
       incProgress(0.8)
     })
   })
-
 
 
   observeEvent(input$choose_naive, {
@@ -1058,8 +1067,6 @@ server <- function(input, output, session) {
       c(
         "candidate",
         "type",
-        "incremental_recovery",
-        "best_block_label",
         "included_records",
         "included_prevalence",
         "excluded_records",
@@ -1086,8 +1093,12 @@ server <- function(input, output, session) {
     datatable(
       shown,
       rownames = FALSE,
-      selection = "single",
-      options = list(pageLength = 20, scrollX = TRUE)
+      selection = "multiple",
+      options = list(
+        pageLength = 20,
+        scrollX = TRUE,
+        select = list(style = "multi")
+      )
     )
   })
 
@@ -1095,10 +1106,14 @@ server <- function(input, output, session) {
     req(candidates(), analysed_set())
 
     selected <- input$candidate_terms_rows_selected
-    if (length(selected) != 1L) {
-      return(tags$span(
-        class = "text-muted",
-        "Select a candidate row to inspect placement and syntax options."
+    if (!length(selected)) {
+      return(tags$div(
+        class = "border rounded p-3 mt-3",
+        tags$strong("Add candidate terms"),
+        tags$p(
+          class = "text-muted mb-0",
+          "Select one or more rows in the table. The selected terms will appear here for addition to a search substring."
+        )
       ))
     }
 
@@ -1109,60 +1124,59 @@ server <- function(input, output, session) {
     missed <- analysed_set()
     missed <- missed[missed$candidate_source, , drop = FALSE]
 
-    scores <- score_candidate_blocks(
-      missed,
-      b,
-      cand$candidate,
-      cand$type
-    )
-    suggested <- suggest_block_id(scores)
+    suggested_ids <- vapply(seq_len(nrow(cand)), function(i) {
+      scores <- score_candidate_blocks(
+        missed,
+        b,
+        cand$candidate[i],
+        cand$type[i]
+      )
+      suggest_block_id(scores)
+    }, integer(1))
+
+    valid_suggestions <- suggested_ids[
+      !is.na(suggested_ids) & suggested_ids %in% b$block_id
+    ]
+
+    suggested <- if (length(valid_suggestions)) {
+      tab <- sort(table(valid_suggestions), decreasing = TRUE)
+      as.integer(names(tab)[1])
+    } else {
+      b$block_id[1]
+    }
 
     block_choices <- setNames(
       b$block_id,
       paste0("Substring ", seq_len(nrow(b)), " · ", b$label)
     )
 
-    forms <- candidate_forms(cand$candidate, cand$type)
-    prox <- proximity_advice(cand$candidate, cand$type)
-
-    placement_note <- NULL
-    if (!is.na(suggested) && nrow(scores)) {
-      s <- scores[scores$block_id == suggested, , drop = FALSE]
-      placement_note <- tags$p(
-        tags$strong("Suggested placement: "),
-        paste0(
-          "Substring ", match(suggested, b$block_id), " · ", s$label,
-          ". In candidate-containing missed records, this substring failed in ",
-          sprintf("%.0f%%", 100 * s$fail_rate),
-          " of evaluable cases; it was the sole failed substring in ",
-          s$sole_failure_support,
-          " record(s)."
-        )
+    selected_items <- Map(function(term, type) {
+      tags$li(
+        tags$code(if (identical(type, "phrase")) paste0('"', term, '"') else term)
       )
-    }
+    }, cand$candidate, cand$type)
 
     tagList(
-      tags$hr(),
-      tags$h5(cand$candidate),
-      placement_note,
-      selectInput(
-        "candidate_block",
-        "Add to substring",
-        choices = block_choices,
-        selected = if (!is.na(suggested)) suggested else b$block_id[1]
-      ),
-      selectInput(
-        "candidate_form",
-        "Add as",
-        choices = forms,
-        selected = unname(forms[1])
-      ),
-      if (!is.null(prox)) tags$p(class = "text-muted", prox),
-      tags$p(
-        class = "text-muted",
-        "Wildcard stems are suggestions only and should be checked for unintended retrieval before use."
-      ),
-      actionButton("add_candidate", "Add candidate to search", class = "btn-primary")
+      tags$div(
+        class = "border rounded p-3 mt-3",
+        tags$h5(sprintf("%d candidate term%s selected", nrow(cand), if (nrow(cand) == 1L) "" else "s")),
+        tags$ul(selected_items),
+        selectInput(
+          "candidate_block",
+          "Add selected terms to substring",
+          choices = block_choices,
+          selected = suggested
+        ),
+        tags$p(
+          class = "text-muted",
+          "Selected terms are added with OR. Single terms are added literally; multi-word phrase candidates are added as exact quoted phrases."
+        ),
+        actionButton(
+          "add_candidate",
+          sprintf("Add %d selected term%s", nrow(cand), if (nrow(cand) == 1L) "" else "s"),
+          class = "btn-primary"
+        )
+      )
     )
   })
 
