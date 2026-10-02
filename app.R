@@ -13,6 +13,7 @@ source("R/audit.R")
 
 ui <- page_sidebar(
   title = "Search Helper",
+  fillable = FALSE,
   theme = bslib::bs_theme(version = 5, bootswatch = "flatly"),
   shinyjs::useShinyjs(),
   tags$head(tags$style(HTML("
