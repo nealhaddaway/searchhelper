@@ -204,3 +204,69 @@ merge_citation_metadata <- function(links, meta) {
   if (!nrow(meta)) return(agg)
   merge(agg, meta, by = "lens_id", all.x = TRUE, sort = FALSE)
 }
+
+
+lens_translate_canonical_query <- function(query) {
+  query <- trimws(query)
+  if (!nzchar(query)) stop("Search string is empty.")
+
+  # Reuse the local parser as a syntax gate. This deliberately rejects
+  # proximity operators because their semantics are database-specific.
+  boolean_to_rpn(query)
+
+  list(
+    query_string = list(
+      query = query,
+      fields = c("title", "abstract", "keyword"),
+      default_operator = "and"
+    )
+  )
+}
+
+lens_ranked_search <- function(query, token, size = 500L) {
+  size <- as.integer(size)
+  if (is.na(size) || size < 1L) stop("size must be a positive integer.")
+  size <- min(size, 1000L)
+
+  body <- list(
+    query = lens_translate_canonical_query(query),
+    size = size,
+    sort = list(list(relevance = "desc")),
+    stemming = FALSE,
+    include = c(
+      "lens_id",
+      "title",
+      "abstract",
+      "keywords",
+      "authors",
+      "year_published",
+      "external_ids",
+      "scholarly_citations_count",
+      "reference_count"
+    )
+  )
+
+  response <- lens_post(body, token)
+  recs <- lens_records(response)
+
+  if (!length(recs)) {
+    return(data.frame(
+      rank = integer(),
+      lens_id = character(),
+      title = character(),
+      year = character(),
+      authors = character(),
+      doi = character(),
+      pmid = character(),
+      abstract = character(),
+      keywords = character(),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  out <- do.call(rbind, lapply(recs, record_row))
+  out$rank <- seq_len(nrow(out))
+  out <- out[, c("rank", setdiff(names(out), "rank")), drop = FALSE]
+  rownames(out) <- NULL
+  out
+}
