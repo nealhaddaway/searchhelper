@@ -42,5 +42,6 @@ screening_summary <- function(screening, target) {
 
 included_benchmarks <- function(screening) {
   if (is.null(screening) || !nrow(screening)) return(data.frame())
-  screening[screening$decision == "include", , drop = FALSE]
+  keep <- !is.na(screening$decision) & screening$decision == "include"
+  screening[keep, , drop = FALSE]
 }
