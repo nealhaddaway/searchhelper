@@ -24,7 +24,19 @@ records <- data.frame(
 stopifnot(all(match_search_records(records, rebuilt)))
 
 added <- add_or_to_block("(aquacultur* OR farm*)", "maricultur*")
-stopifnot(grepl("maricultur\\*", added))
+stopifnot(identical(added, "aquacultur* OR farm* OR maricultur*"))
+
+added_again <- add_or_to_block(added, "cages")
+stopifnot(identical(added_again, "aquacultur* OR farm* OR maricultur* OR cages"))
+
+single_wrapped <- rebuild_search_from_blocks(data.frame(
+  block_id = 1L,
+  label = "Concept 1",
+  expression = added_again,
+  stringsAsFactors = FALSE
+))
+stopifnot(identical(single_wrapped, "(aquacultur* OR farm* OR maricultur* OR cages)"))
+stopifnot(!grepl("(((", single_wrapped, fixed = TRUE))
 
 placement_blocks <- data.frame(
   block_id = 1:2,
