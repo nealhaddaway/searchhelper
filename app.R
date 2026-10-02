@@ -13,25 +13,24 @@ source("R/audit.R")
 
 ui <- page_sidebar(
   title = "Search Helper",
+  theme = bslib::bs_theme(version = 5, bootswatch = "flatly"),
   shinyjs::useShinyjs(),
   sidebar = sidebar(
-    fileInput("ris", "Benchmark records (RIS)", accept = c(".ris", ".txt")),
+    title = "Current search",
     textAreaInput(
       "search_string",
-      "Draft Boolean search string",
+      "Search string",
       rows = 8,
       placeholder = '(concept A OR synonym*) AND ("concept B" OR term)'
     ),
-    actionButton("resolve", "Resolve benchmarks in Lens", class = "btn-primary"),
-    actionButton("chase", "Run citation chasing", disabled = TRUE),
-    actionButton("analyse_search", "Analyse draft search", disabled = TRUE),
+    actionButton("analyse_search", "Check current search", disabled = TRUE),
     hr(),
-    downloadButton("download_citations", "Download citation set (CSV)")
+    tags$p(class = "text-muted small", "Already have known relevant papers? Upload them below in Start with benchmark records.")
   ),
 
   card(
-    card_header("Final search"),
-    p("This is the current improved search string. Continue refining it below, or download it when you are satisfied."),
+    card_header("Your improved search string"),
+    p("This is the main output. Continue refining it below, or download it when you are satisfied."),
     textAreaInput("final_search_display", NULL, value = "", rows = 8, width = "100%"),
     layout_columns(
       col_widths = c(6, 6),
@@ -42,8 +41,8 @@ ui <- page_sidebar(
   ),
 
   card(
-    card_header("Stage 4 · Start from concepts"),
-    p("Build one or more optional search substrings, then retrieve a relevance-ranked Lens sample from title, abstract and author keyword fields."),
+    card_header("Start with concepts"),
+    p("Use this route if you do not already have benchmark papers. Build one or more search substrings, retrieve a relevance-ranked Lens sample, then screen records to create your benchmark set."),
     uiOutput("concept_block_editor"),
     layout_columns(
       col_widths = c(4, 4, 4),
@@ -71,21 +70,31 @@ ui <- page_sidebar(
   ),
 
   card(
-    card_header("Stage 1 · Benchmark initialisation"),
-    p("Upload known relevant records, resolve them in Lens, then retrieve backward references and forward citations."),
+    card_header("Start with benchmark records"),
+    p("Use this route if you already have known relevant papers. Upload them as RIS, resolve them in Lens, then use citation chasing to test and improve your search."),
+    fileInput("ris", "Benchmark records (RIS)", accept = c(".ris", ".txt")),
+    actionButton("resolve", "Resolve benchmarks in Lens", class = "btn-primary"),
+    actionButton("chase", "Run citation chasing", disabled = TRUE),
     uiOutput("status"),
-    DTOutput("benchmarks")
+    accordion(
+      accordion_panel("View benchmark records", DTOutput("benchmarks")),
+      open = FALSE
+    )
   ),
 
   card(
-    card_header("Citation chasing"),
+    card_header("Citation-chasing coverage"),
+    p("The app checks both backward references and forward citations from your benchmark set."),
     uiOutput("citation_summary"),
-    DTOutput("citations")
+    accordion(
+      accordion_panel("View citation-chasing records", DTOutput("citations")),
+      open = FALSE
+    )
   ),
 
   card(
-    card_header("Search structure"),
-    p("Top-level AND components are treated as separate substrings. Labels are descriptive only: multiple substrings may share the same label."),
+    card_header("Edit search structure"),
+    p("Each top-level AND component is treated as a separate substring. Labels are descriptive only, so several substrings can share the same label."),
     uiOutput("block_editor"),
     layout_columns(
       col_widths = c(6, 6),
@@ -95,14 +104,17 @@ ui <- page_sidebar(
   ),
 
   card(
-    card_header("Draft-search coverage"),
+    card_header("What is the current search missing?"),
     uiOutput("coverage_summary"),
-    DTOutput("missed_records")
+    accordion(
+      accordion_panel("View missed records", DTOutput("missed_records")),
+      open = FALSE
+    )
   ),
 
   card(
-    card_header("Candidate terms from missed records"),
-    p("Select one candidate to inspect where it may fit. Existing search terms and common English stop words are excluded."),
+    card_header("Suggested improvements"),
+    p("Candidates are drawn from missed citation records and, where screening data are available, ranked using their prevalence in included versus excluded records. Select a candidate to inspect where it may fit."),
     DTOutput("candidate_terms"),
     uiOutput("candidate_action")
   )
