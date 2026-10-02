@@ -88,7 +88,9 @@ jobs:
           LENS_API_TOKEN: ${{ secrets.LENS_API_TOKEN }}
         run: |
           Rscript - <<'RS'
-          if (!requireNamespace("httr2", quietly = TRUE)) install.packages("httr2")
+          needed <- c("httr2", "jsonlite")
+          missing <- needed[!vapply(needed, requireNamespace, logical(1), quietly = TRUE)]
+          if (length(missing)) install.packages(missing)
           source("R/boolean_match.R")
           source("R/lens_api.R")
           token <- Sys.getenv("LENS_API_TOKEN")
