@@ -28,6 +28,21 @@ ui <- page_sidebar(
   ),
 
   card(
+    card_header("Stage 4 · Start from concepts"),
+    p("Build one or more optional search substrings, then retrieve a relevance-ranked Lens sample from title, abstract and author keyword fields."),
+    uiOutput("concept_block_editor"),
+    layout_columns(
+      col_widths = c(4, 4, 4),
+      actionButton("concept_add_block", "Add substring"),
+      numericInput("concept_n", "Records to retrieve", value = 500, min = 20, max = 500, step = 20),
+      actionButton("concept_search", "Search Lens", class = "btn-primary")
+    ),
+    uiOutput("concept_query_preview"),
+    uiOutput("concept_search_summary"),
+    DTOutput("concept_results")
+  ),
+
+  card(
     card_header("Stage 1 · Benchmark initialisation"),
     p("Upload known relevant records, resolve them in Lens, then retrieve backward references and forward citations."),
     uiOutput("status"),
@@ -74,6 +89,28 @@ server <- function(input, output, session) {
   analysed_set <- reactiveVal(NULL)
   candidates <- reactiveVal(NULL)
   blocks <- reactiveVal(NULL)
+  concept_blocks <- reactiveVal(data.frame(
+    block_id = 1L,
+    label = "Concept 1",
+    expression = "",
+    stringsAsFactors = FALSE
+  ))
+  concept_results <- reactiveVal(NULL)
+
+  collect_concept_blocks <- function() {
+    b <- concept_blocks()
+    if (is.null(b) || !nrow(b)) return(b)
+
+    for (i in seq_len(nrow(b))) {
+      label_id <- paste0("concept_label_", i)
+      expr_id <- paste0("concept_expr_", i)
+
+      if (!is.null(input[[label_id]])) b$label[i] <- input[[label_id]]
+      if (!is.null(input[[expr_id]])) b$expression[i] <- input[[expr_id]]
+    }
+
+    b
+  }
 
   collect_blocks <- function() {
     b <- blocks()
@@ -128,6 +165,60 @@ server <- function(input, output, session) {
       if (!is.null(parsed_blocks)) blocks(parsed_blocks)
     }
   }
+
+  observeEvent(input$concept_add_block, {
+    b <- collect_concept_blocks()
+
+    if (is.null(b) || !nrow(b)) {
+      b <- data.frame(
+        block_id = 1L,
+        label = "Concept 1",
+        expression = "",
+        stringsAsFactors = FALSE
+      )
+    } else {
+      new_id <- max(b$block_id) + 1L
+      b <- rbind(
+        b,
+        data.frame(
+          block_id = new_id,
+          label = paste("Concept", new_id),
+          expression = "",
+          stringsAsFactors = FALSE
+        )
+      )
+    }
+
+    concept_blocks(b)
+  })
+
+  observeEvent(input$concept_search, {
+    validate(need(nzchar(token), "LENS_API_TOKEN is not available in the app environment."))
+
+    b <- collect_concept_blocks()
+    validate(need(!is.null(b) && nrow(b) > 0, "Add at least one substring."))
+
+    query <- rebuild_search_from_blocks(b)
+    validate(need(nzchar(query), "Enter at least one search term."))
+
+    withProgress(message = "Searching Lens by relevance…", value = 0.15, {
+      result <- tryCatch(
+        lens_ranked_search(query, token, size = input$concept_n),
+        error = function(e) {
+          showNotification(conditionMessage(e), type = "error", duration = NULL)
+          NULL
+        }
+      )
+      req(!is.null(result))
+      incProgress(0.75)
+
+      concept_blocks(b)
+      concept_results(result)
+      blocks(b)
+      updateTextAreaInput(session, "search_string", value = query)
+      incProgress(0.10)
+    })
+  })
 
   observeEvent(input$ris, {
     req(input$ris$datapath)
@@ -251,6 +342,80 @@ server <- function(input, output, session) {
       run_analysis(query, refresh_blocks = FALSE)
       incProgress(0.8)
     })
+  })
+
+
+  output$concept_block_editor <- renderUI({
+    b <- concept_blocks()
+
+    preset_labels <- c(
+      "Population",
+      "Intervention or exposure",
+      "Outcome",
+      "Study design",
+      "Context"
+    )
+
+    tagList(lapply(seq_len(nrow(b)), function(i) {
+      card(
+        card_header(sprintf("Substring %d", i)),
+        selectizeInput(
+          paste0("concept_label_", i),
+          "Label",
+          choices = unique(c(preset_labels, b$label[i])),
+          selected = b$label[i],
+          options = list(create = TRUE)
+        ),
+        textAreaInput(
+          paste0("concept_expr_", i),
+          "Terms / Boolean expression",
+          value = b$expression[i],
+          rows = 3,
+          placeholder = 'e.g. salmon* OR "rainbow trout"'
+        )
+      )
+    }))
+  })
+
+  output$concept_query_preview <- renderUI({
+    b <- collect_concept_blocks()
+    if (is.null(b) || !nrow(b)) return(NULL)
+
+    query <- rebuild_search_from_blocks(b)
+    if (!nzchar(query)) {
+      return(tags$span(class = "text-muted", "The canonical Boolean search will appear here."))
+    }
+
+    tags$div(
+      tags$strong("Canonical Boolean: "),
+      tags$code(query)
+    )
+  })
+
+  output$concept_search_summary <- renderUI({
+    x <- concept_results()
+    if (is.null(x)) {
+      return(tags$span(class = "text-muted", "No Lens sample retrieved yet."))
+    }
+
+    tags$strong(sprintf("%d relevance-ranked Lens records retrieved.", nrow(x)))
+  })
+
+  output$concept_results <- renderDT({
+    req(concept_results())
+
+    x <- concept_results()
+    keep <- intersect(
+      c("rank", "lens_id", "title", "year", "authors", "doi", "keywords", "abstract"),
+      names(x)
+    )
+
+    datatable(
+      x[, keep, drop = FALSE],
+      rownames = FALSE,
+      selection = "none",
+      options = list(pageLength = 20, scrollX = TRUE)
+    )
   })
 
   output$status <- renderUI({
