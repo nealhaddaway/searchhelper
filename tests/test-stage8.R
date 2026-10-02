@@ -41,4 +41,10 @@ stopifnot(grepl('Variants and synonyms', app_text, fixed = TRUE))
 stopifnot(grepl('Add selected suggestions', app_text, fixed = TRUE))
 stopifnot(grepl('external_suggestions_rows_selected', app_text, fixed = TRUE))
 
+stopifnot(grepl('"Citation pool"', app_text, fixed = TRUE))
+stopifnot(grepl('"Included"', app_text, fixed = TRUE))
+stopifnot(grepl('"Excluded"', app_text, fixed = TRUE))
+stopifnot(grepl('"Relationship"', app_text, fixed = TRUE))
+stopifnot(grepl('"From term"', app_text, fixed = TRUE))
+
 cat("Natural page-flow regression test passed.\n")
