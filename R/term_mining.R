@@ -128,3 +128,113 @@ mine_candidate_terms <- function(records, query = "", top_n = 200L) {
   rownames(out) <- NULL
   head(out, as.integer(top_n))
 }
+
+
+candidate_present_in_records <- function(records, candidate, type = NULL) {
+  if (is.null(records) || !nrow(records)) return(logical())
+
+  if (is.null(type)) {
+    type <- if (grepl(" ", candidate, fixed = TRUE)) "phrase" else "term"
+  }
+
+  fields <- intersect(c("title", "abstract", "keywords"), names(records))
+  if (!length(fields)) return(rep(FALSE, nrow(records)))
+
+  text <- apply(records[, fields, drop = FALSE], 1, function(x) {
+    x <- x[!is.na(x) & nzchar(x)]
+    paste(x, collapse = " ")
+  })
+
+  token <- if (identical(type, "phrase")) paste0('"', candidate, '"') else candidate
+  vapply(
+    text,
+    function(x) leaf_match(token, normalise_doc_tokens(x)),
+    logical(1)
+  )
+}
+
+rank_discriminative_candidates <- function(
+  missed_records,
+  included_records,
+  excluded_records,
+  query = "",
+  top_n = 200L,
+  prior = 0.5
+) {
+  base <- mine_candidate_terms(missed_records, query = query, top_n = max(as.integer(top_n), 500L))
+  if (!nrow(base)) return(base)
+
+  n_inc <- if (is.null(included_records)) 0L else nrow(included_records)
+  n_exc <- if (is.null(excluded_records)) 0L else nrow(excluded_records)
+
+  stats <- lapply(seq_len(nrow(base)), function(i) {
+    candidate <- base$candidate[i]
+    type <- base$type[i]
+
+    inc_present <- candidate_present_in_records(included_records, candidate, type)
+    exc_present <- candidate_present_in_records(excluded_records, candidate, type)
+
+    inc_n <- sum(inc_present, na.rm = TRUE)
+    exc_n <- sum(exc_present, na.rm = TRUE)
+
+    inc_prev <- if (n_inc > 0) inc_n / n_inc else NA_real_
+    exc_prev <- if (n_exc > 0) exc_n / n_exc else NA_real_
+
+    # Jeffreys-style smoothing avoids infinite ratios when a term is absent
+    # from one group while remaining easy to interpret.
+    inc_smoothed <- if (n_inc > 0) (inc_n + prior) / (n_inc + 2 * prior) else NA_real_
+    exc_smoothed <- if (n_exc > 0) (exc_n + prior) / (n_exc + 2 * prior) else NA_real_
+
+    enrichment <- if (is.finite(inc_smoothed) && is.finite(exc_smoothed)) {
+      log2(inc_smoothed / exc_smoothed)
+    } else {
+      NA_real_
+    }
+
+    data.frame(
+      candidate = candidate,
+      included_records = inc_n,
+      included_prevalence = inc_prev,
+      excluded_records = exc_n,
+      excluded_prevalence = exc_prev,
+      log2_enrichment = enrichment,
+      stringsAsFactors = FALSE
+    )
+  })
+
+  stats <- do.call(rbind, stats)
+  out <- merge(base, stats, by = "candidate", all.x = TRUE, sort = FALSE)
+
+  # Keep the original missed-record coverage as the explicit incremental gain.
+  out$missed_gain <- out$n_records
+  out$discrimination_available <- n_inc > 0L && n_exc > 0L
+
+  if (n_inc > 0L && n_exc > 0L) {
+    out <- out[
+      order(
+        -out$log2_enrichment,
+        -out$missed_gain,
+        -out$keyword_records,
+        -out$occurrences,
+        out$candidate,
+        na.last = TRUE
+      ),
+      ,
+      drop = FALSE
+    ]
+  } else {
+    out <- out[
+      order(
+        -out$missed_gain,
+        -out$keyword_records,
+        -out$occurrences,
+        out$candidate
+      ),
+      ,
+      drop = FALSE
+    ]
+  }
+
+  rownames(out) <- NULL
+  head(out, as.integer(top_n))
+}
