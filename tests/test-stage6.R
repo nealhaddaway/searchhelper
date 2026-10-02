@@ -78,7 +78,7 @@ ranked_positive <- rank_discriminative_candidates(
 
 farming <- ranked_positive[ranked_positive$candidate == "farming", , drop = FALSE]
 stopifnot(nrow(farming) == 1L)
-stopifnot(farming$included_records == 1L)
+stopifnot(farming$included_records == 2L)
 stopifnot(farming$citation_source_records == 0L)
 stopifnot(farming$candidate_origin == "included")
 stopifnot(!"genetics" %in% ranked_positive$candidate)
