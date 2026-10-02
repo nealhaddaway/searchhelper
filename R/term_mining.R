@@ -46,7 +46,7 @@ plain_search_terms <- function(query) {
   unique(tokens[nzchar(tokens)])
 }
 
-candidate_tokens <- function(text, include_bigrams = TRUE) {
+candidate_tokens <- function(text, include_bigrams = TRUE, include_trigrams = TRUE) {
   if (is.na(text) || !nzchar(text)) return(character())
 
   text <- tolower(text)
@@ -60,19 +60,39 @@ candidate_tokens <- function(text, include_bigrams = TRUE) {
     !grepl("^[0-9]+$", raw)
   unigrams <- raw[content_keep]
 
-  if (!include_bigrams || length(raw) < 2L) return(unigrams)
+  bigrams <- character()
+  if (include_bigrams && length(raw) >= 2L) {
+    left <- head(raw, -1)
+    right <- tail(raw, -1)
+    valid_bigram <- nchar(left) >= 2 &
+      nchar(right) >= 2 &
+      !grepl("^[0-9]+$", left) &
+      !grepl("^[0-9]+$", right) &
+      !left %in% stop &
+      !right %in% stop
 
-  left <- head(raw, -1)
-  right <- tail(raw, -1)
-  valid_bigram <- nchar(left) >= 2 &
-    nchar(right) >= 2 &
-    !grepl("^[0-9]+$", left) &
-    !grepl("^[0-9]+$", right) &
-    !left %in% stop &
-    !right %in% stop
+    bigrams <- paste(left[valid_bigram], right[valid_bigram])
+  }
 
-  bigrams <- paste(left[valid_bigram], right[valid_bigram])
-  c(unigrams, bigrams)
+  trigrams <- character()
+  if (include_trigrams && length(raw) >= 3L) {
+    first <- raw[seq_len(length(raw) - 2L)]
+    middle <- raw[seq.int(2L, length(raw) - 1L)]
+    last <- raw[seq.int(3L, length(raw))]
+
+    valid_trigram <- nchar(first) >= 2 &
+      nchar(middle) >= 2 &
+      nchar(last) >= 2 &
+      !grepl("^[0-9]+$", first) &
+      !grepl("^[0-9]+$", middle) &
+      !grepl("^[0-9]+$", last) &
+      !first %in% stop &
+      !last %in% stop
+
+    trigrams <- paste(first[valid_trigram], middle[valid_trigram], last[valid_trigram])
+  }
+
+  c(unigrams, bigrams, trigrams)
 }
 
 is_already_represented <- function(candidate, search_terms) {
