@@ -52,6 +52,7 @@ record_row <- function(r) {
     doi = extract_external_id(r, "doi"),
     pmid = extract_external_id(r, "pmid"),
     abstract = as.character(r$abstract %||% NA_character_),
+    keywords = paste(as.character(unlist(r$keywords %||% character(), use.names = FALSE)), collapse = "; "),
     stringsAsFactors = FALSE
   )
 }
@@ -176,7 +177,7 @@ lens_fetch_records <- function(lens_ids, token) {
     recs <- lens_search(
       list(terms = list(lens_id = unname(chunk))), token,
       size = length(chunk),
-      include = c("lens_id", "title", "abstract", "authors", "year_published", "external_ids")
+      include = c("lens_id", "title", "abstract", "keywords", "authors", "year_published", "external_ids")
     )
     rows <- c(rows, lapply(recs, record_row))
   }
