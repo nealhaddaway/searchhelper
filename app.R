@@ -165,7 +165,76 @@ server <- function(input, output, session) {
     analysed_set(x)
 
     missed <- x[x$candidate_source, , drop = FALSE]
-    candidates(mine_candidate_terms(missed, query, top_n = 250L))
+
+    s <- screening()
+    included <- if (!is.null(s) && nrow(s)) {
+      s[!is.na(s$decision) & s$decision == "include", , drop = FALSE]
+    } else {
+      data.frame()
+    }
+    excluded <- if (!is.null(s) && nrow(s)) {
+      s[!is.na(s$decision) & s$decision == "exclude", , drop = FALSE]
+    } else {
+      data.frame()
+    }
+
+    ranked <- rank_discriminative_candidates(
+      missed_records = missed,
+      included_records = included,
+      excluded_records = excluded,
+      query = query,
+      top_n = 250L
+    )
+
+    current_blocks <- if (!is.null(blocks()) && nrow(blocks())) {
+      blocks()
+    } else {
+      tryCatch(split_search_blocks(query), error = function(e) NULL)
+    }
+
+    if (nrow(ranked) && !is.null(current_blocks) && nrow(current_blocks)) {
+      gains <- lapply(seq_len(nrow(ranked)), function(i) {
+        best_candidate_gain(
+          records = missed,
+          blocks = current_blocks,
+          candidate = ranked$candidate[i],
+          type = ranked$type[i]
+        )
+      })
+
+      ranked$best_block_id <- vapply(gains, function(g) g$block_id, integer(1))
+      ranked$best_block_label <- vapply(gains, function(g) {
+        if (is.na(g$label)) "" else g$label
+      }, character(1))
+      ranked$incremental_recovery <- vapply(gains, function(g) g$gain, integer(1))
+
+      if (all(ranked$discrimination_available)) {
+        ranked <- ranked[
+          order(
+            -ranked$log2_enrichment,
+            -ranked$incremental_recovery,
+            -ranked$keyword_records,
+            ranked$candidate,
+            na.last = TRUE
+          ),
+          ,
+          drop = FALSE
+        ]
+      } else {
+        ranked <- ranked[
+          order(
+            -ranked$incremental_recovery,
+            -ranked$keyword_records,
+            ranked$candidate
+          ),
+          ,
+          drop = FALSE
+        ]
+      }
+      rownames(ranked) <- NULL
+    }
+
+    candidates(ranked)
 
     if (refresh_blocks || is.null(blocks())) {
       parsed_blocks <- tryCatch(
@@ -713,8 +782,39 @@ server <- function(input, output, session) {
   output$candidate_terms <- renderDT({
     req(candidates())
 
+    x <- candidates()
+
+    keep <- intersect(
+      c(
+        "candidate",
+        "type",
+        "incremental_recovery",
+        "best_block_label",
+        "included_records",
+        "included_prevalence",
+        "excluded_records",
+        "excluded_prevalence",
+        "log2_enrichment",
+        "keyword_records",
+        "occurrences"
+      ),
+      names(x)
+    )
+
+    shown <- x[, keep, drop = FALSE]
+
+    if ("included_prevalence" %in% names(shown)) {
+      shown$included_prevalence <- round(shown$included_prevalence, 3)
+    }
+    if ("excluded_prevalence" %in% names(shown)) {
+      shown$excluded_prevalence <- round(shown$excluded_prevalence, 3)
+    }
+    if ("log2_enrichment" %in% names(shown)) {
+      shown$log2_enrichment <- round(shown$log2_enrichment, 2)
+    }
+
     datatable(
-      candidates(),
+      shown,
       rownames = FALSE,
       selection = "single",
       options = list(pageLength = 20, scrollX = TRUE)
