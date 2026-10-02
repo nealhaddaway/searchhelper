@@ -134,27 +134,12 @@ server <- function(input, output, session) {
       tryCatch(split_search_blocks(query), error = function(e) NULL)
     }
 
-    if (nrow(ranked) && !is.null(current_blocks) && nrow(current_blocks)) {
-      gains <- lapply(seq_len(nrow(ranked)), function(i) {
-        best_candidate_gain(
-          records = missed,
-          blocks = current_blocks,
-          candidate = ranked$candidate[i],
-          type = ranked$type[i]
-        )
-      })
-
-      ranked$best_block_id <- vapply(gains, function(g) g$block_id, integer(1))
-      ranked$best_block_label <- vapply(gains, function(g) {
-        if (is.na(g$label)) "" else g$label
-      }, character(1))
-      ranked$incremental_recovery <- vapply(gains, function(g) g$gain, integer(1))
-
+    if (nrow(ranked)) {
       if (all(ranked$discrimination_available)) {
         ranked <- ranked[
           order(
             -ranked$log2_enrichment,
-            -ranked$incremental_recovery,
+            -ranked$missed_gain,
             -ranked$keyword_records,
             ranked$candidate,
             na.last = TRUE
@@ -165,7 +150,7 @@ server <- function(input, output, session) {
       } else {
         ranked <- ranked[
           order(
-            -ranked$incremental_recovery,
+            -ranked$missed_gain,
             -ranked$keyword_records,
             ranked$candidate
           ),
