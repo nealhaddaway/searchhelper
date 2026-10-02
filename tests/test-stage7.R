@@ -44,5 +44,7 @@ html <- render_audit_html(
 stopifnot(grepl("Final search string", html, fixed = TRUE))
 stopifnot(grepl("mariculture", html, fixed = TRUE))
 stopifnot(grepl("70.0%", html, fixed = TRUE))
+stopifnot(grepl("citation-chasing overlap", html, fixed = TRUE))
+stopifnot(grepl("not a recall target", html, fixed = TRUE))
 
 cat("Stage 7 audit tests passed.\n")

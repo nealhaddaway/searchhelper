@@ -1,5 +1,5 @@
 english_stopwords <- function() {
-  c(
+  core <- c(
     "a","about","above","after","again","against","all","am","an","and","any","are","as","at",
     "be","because","been","before","being","below","between","both","but","by","can","could",
     "did","do","does","doing","down","during","each","few","for","from","further","had","has",
@@ -11,6 +11,23 @@ english_stopwords <- function() {
     "too","under","until","up","very","was","we","were","what","when","where","which","while",
     "who","whom","why","will","with","would","you","your","yours","yourself","yourselves"
   )
+
+  # Broader low-information English terms commonly covered by SMART/Snowball-style
+  # stopword lexicons. Kept explicit here to avoid adding a runtime package dependency.
+  extended <- c(
+    "almost","already","also","although","always","among","amongst","another","around",
+    "became","become","becomes","becoming","beside","besides","beyond","cannot",
+    "concerning","consequently","considering","despite","else","elsewhere","enough",
+    "especially","etc","ever","every","everybody","everyone","everything","everywhere",
+    "except","however","indeed","instead","later","least","less","many","meanwhile",
+    "moreover","mostly","much","neither","never","nevertheless","next","often","otherwise",
+    "perhaps","quite","rather","really","several","since","sometimes","still","thereafter",
+    "thereby","therefore","though","throughout","thus","together","toward","towards",
+    "unless","upon","via","whatever","whenever","whereas","whereby","wherever","whether",
+    "within","without","yet"
+  )
+
+  unique(c(core, extended))
 }
 
 plain_search_terms <- function(query) {
@@ -29,7 +46,7 @@ plain_search_terms <- function(query) {
   unique(tokens[nzchar(tokens)])
 }
 
-candidate_tokens <- function(text, include_bigrams = TRUE) {
+candidate_tokens <- function(text, include_bigrams = TRUE, include_trigrams = TRUE) {
   if (is.na(text) || !nzchar(text)) return(character())
 
   text <- tolower(text)
@@ -43,18 +60,39 @@ candidate_tokens <- function(text, include_bigrams = TRUE) {
     !grepl("^[0-9]+$", raw)
   unigrams <- raw[content_keep]
 
-  if (!include_bigrams || length(raw) < 2L) return(unigrams)
+  bigrams <- character()
+  if (include_bigrams && length(raw) >= 2L) {
+    left <- head(raw, -1)
+    right <- tail(raw, -1)
+    valid_bigram <- nchar(left) >= 2 &
+      nchar(right) >= 2 &
+      !grepl("^[0-9]+$", left) &
+      !grepl("^[0-9]+$", right) &
+      !left %in% stop &
+      !right %in% stop
 
-  left <- head(raw, -1)
-  right <- tail(raw, -1)
-  valid_bigram <- nchar(left) >= 2 &
-    nchar(right) >= 2 &
-    !grepl("^[0-9]+$", left) &
-    !grepl("^[0-9]+$", right) &
-    !(left %in% stop & right %in% stop)
+    bigrams <- paste(left[valid_bigram], right[valid_bigram])
+  }
 
-  bigrams <- paste(left[valid_bigram], right[valid_bigram])
-  c(unigrams, bigrams)
+  trigrams <- character()
+  if (include_trigrams && length(raw) >= 3L) {
+    first <- raw[seq_len(length(raw) - 2L)]
+    middle <- raw[seq.int(2L, length(raw) - 1L)]
+    last <- raw[seq.int(3L, length(raw))]
+
+    valid_trigram <- nchar(first) >= 2 &
+      nchar(middle) >= 2 &
+      nchar(last) >= 2 &
+      !grepl("^[0-9]+$", first) &
+      !grepl("^[0-9]+$", middle) &
+      !grepl("^[0-9]+$", last) &
+      !first %in% stop &
+      !last %in% stop
+
+    trigrams <- paste(first[valid_trigram], middle[valid_trigram], last[valid_trigram])
+  }
+
+  c(unigrams, bigrams, trigrams)
 }
 
 is_already_represented <- function(candidate, search_terms) {
