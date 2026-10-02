@@ -23,3 +23,7 @@ stopifnot(grepl('Citation coverage becomes available', app_text, fixed = TRUE))
 stopifnot(grepl('citation-chased', app_text, fixed = TRUE))
 stopifnot(grepl('class = "search-output"', app_text, fixed = TRUE))
 cat("Connect Cloud UI hotfix tests passed.\n")
+
+app_text <- paste(readLines("app.R", warn = FALSE), collapse = "\n")
+stopifnot(grepl("fillable = FALSE", app_text, fixed = TRUE))
+cat("Natural page-flow regression test passed.\n")
