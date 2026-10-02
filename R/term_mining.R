@@ -199,8 +199,78 @@ rank_discriminative_candidates <- function(
   top_n = 200L,
   prior = 0.5
 ) {
-  base <- mine_candidate_terms(missed_records, query = query, top_n = max(as.integer(top_n), 500L))
-  if (!nrow(base)) return(base)
+  source_limit <- max(as.integer(top_n), 500L)
+
+  citation_base <- mine_candidate_terms(
+    missed_records,
+    query = query,
+    top_n = source_limit
+  )
+  included_base <- mine_candidate_terms(
+    included_records,
+    query = query,
+    top_n = source_limit
+  )
+
+  if (!nrow(citation_base) && !nrow(included_base)) return(data.frame())
+
+  prep_source <- function(x, prefix) {
+    if (is.null(x) || !nrow(x)) {
+      out <- data.frame(candidate = character(), type = character(), stringsAsFactors = FALSE)
+      out[[paste0(prefix, "_records")]] <- integer()
+      out[[paste0(prefix, "_occurrences")]] <- integer()
+      out[[paste0(prefix, "_keyword_records")]] <- integer()
+      return(out)
+    }
+
+    out <- x[, c("candidate", "type", "n_records", "occurrences", "keyword_records"), drop = FALSE]
+    names(out)[names(out) == "n_records"] <- paste0(prefix, "_records")
+    names(out)[names(out) == "occurrences"] <- paste0(prefix, "_occurrences")
+    names(out)[names(out) == "keyword_records"] <- paste0(prefix, "_keyword_records")
+    out
+  }
+
+  citation_source <- prep_source(citation_base, "citation_source")
+  included_source <- prep_source(included_base, "included_source")
+
+  base <- merge(
+    citation_source,
+    included_source,
+    by = "candidate",
+    all = TRUE,
+    suffixes = c("_citation", "_included"),
+    sort = FALSE
+  )
+
+  type_citation <- if ("type_citation" %in% names(base)) base$type_citation else rep(NA_character_, nrow(base))
+  type_included <- if ("type_included" %in% names(base)) base$type_included else rep(NA_character_, nrow(base))
+  if ("type" %in% names(base)) {
+    base$type <- as.character(base$type)
+  } else {
+    base$type <- ifelse(!is.na(type_citation), type_citation, type_included)
+  }
+
+  numeric_cols <- c(
+    "citation_source_records",
+    "citation_source_occurrences",
+    "citation_source_keyword_records",
+    "included_source_records",
+    "included_source_occurrences",
+    "included_source_keyword_records"
+  )
+  for (nm in numeric_cols) {
+    if (!nm %in% names(base)) base[[nm]] <- 0L
+    base[[nm]][is.na(base[[nm]])] <- 0L
+  }
+
+  base$candidate_origin <- ifelse(
+    base$included_source_records > 0L & base$citation_source_records > 0L,
+    "included + citation",
+    ifelse(base$included_source_records > 0L, "included", "citation")
+  )
+  base$occurrences <- base$included_source_occurrences + base$citation_source_occurrences
+  base$keyword_records <- base$included_source_keyword_records + base$citation_source_keyword_records
+  base$n_records <- base$included_source_records + base$citation_source_records
 
   n_inc <- if (is.null(included_records)) 0L else nrow(included_records)
   n_exc <- if (is.null(excluded_records)) 0L else nrow(excluded_records)
@@ -218,8 +288,6 @@ rank_discriminative_candidates <- function(
     inc_prev <- if (n_inc > 0) inc_n / n_inc else NA_real_
     exc_prev <- if (n_exc > 0) exc_n / n_exc else NA_real_
 
-    # Jeffreys-style smoothing avoids infinite ratios when a term is absent
-    # from one group while remaining easy to interpret.
     inc_smoothed <- if (n_inc > 0) (inc_n + prior) / (n_inc + 2 * prior) else NA_real_
     exc_smoothed <- if (n_exc > 0) (exc_n + prior) / (n_exc + 2 * prior) else NA_real_
 
@@ -243,15 +311,16 @@ rank_discriminative_candidates <- function(
   stats <- do.call(rbind, stats)
   out <- merge(base, stats, by = "candidate", all.x = TRUE, sort = FALSE)
 
-  # Keep the original missed-record coverage as the explicit incremental gain.
-  out$missed_gain <- out$n_records
+  out$citation_gain <- out$citation_source_records
+  out$missed_gain <- out$citation_gain
   out$discrimination_available <- n_inc > 0L && n_exc > 0L
 
   if (n_inc > 0L && n_exc > 0L) {
     out <- out[
       order(
+        -out$included_prevalence,
         -out$log2_enrichment,
-        -out$missed_gain,
+        -out$citation_gain,
         -out$keyword_records,
         -out$occurrences,
         out$candidate,
@@ -260,10 +329,22 @@ rank_discriminative_candidates <- function(
       ,
       drop = FALSE
     ]
+  } else if (n_inc > 0L) {
+    out <- out[
+      order(
+        -out$included_prevalence,
+        -out$citation_gain,
+        -out$keyword_records,
+        -out$occurrences,
+        out$candidate
+      ),
+      ,
+      drop = FALSE
+    ]
   } else {
     out <- out[
       order(
-        -out$missed_gain,
+        -out$citation_gain,
         -out$keyword_records,
         -out$occurrences,
         out$candidate
@@ -276,3 +357,4 @@ rank_discriminative_candidates <- function(
   rownames(out) <- NULL
   head(out, as.integer(top_n))
 }
+
