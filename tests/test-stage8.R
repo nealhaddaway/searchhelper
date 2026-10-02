@@ -21,6 +21,8 @@ stopifnot(!grepl('card_header(sprintf("Substring %d", i))', app_text, fixed = TR
 stopifnot(grepl('Reidentify candidate terms', app_text, fixed = TRUE))
 stopifnot(grepl('Citation-chasing comparison becomes available', app_text, fixed = TRUE))
 stopifnot(grepl('not a recall target', app_text, fixed = TRUE))
+stopifnot(grepl('screened included records', app_text, fixed = TRUE))
+stopifnot(grepl('Excluded screened records influence ranking but do not generate candidate terms', app_text, fixed = TRUE))
 stopifnot(!grepl('remain missed', app_text, fixed = TRUE))
 stopifnot(grepl('citation-chased', app_text, fixed = TRUE))
 stopifnot(grepl('class = "search-output"', app_text, fixed = TRUE))
